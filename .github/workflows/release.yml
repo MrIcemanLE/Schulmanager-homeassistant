@@ -1,38 +1,66 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   release:
-    name: Prepare release
+    name: Create Release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Get version
         id: version
         run: |
-          version=$(cat schulmanager/manifest.json | jq -r '.version')
+          version=${GITHUB_REF#refs/tags/v}
           echo "version=$version" >> $GITHUB_OUTPUT
 
-      - name: Update version in manifest
+      - name: Extract changelog
+        id: changelog
         run: |
-          sed -i 's/"version": ".*"/"version": "'${{ github.event.release.tag_name }}'"/' schulmanager/manifest.json
+          # Extract the changelog for this version
+          if [ -f CHANGELOG.md ]; then
+            awk "/^## \[${{ steps.version.outputs.version }}\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md > release_notes.txt
+          else
+            echo "Release v${{ steps.version.outputs.version }}" > release_notes.txt
+          fi
+
+      - name: Validate manifest version
+        run: |
+          manifest_version=$(cat custom_components/schulmanager/manifest.json | jq -r '.version')
+          if [ "$manifest_version" != "${{ steps.version.outputs.version }}" ]; then
+            echo "Error: Manifest version ($manifest_version) does not match tag version (${{ steps.version.outputs.version }})"
+            exit 1
+          fi
 
       - name: Zip integration
         run: |
-          cd schulmanager
-          zip -r ../schulmanager-${{ github.event.release.tag_name }}.zip . -x "*.pyc" "__pycache__/*" "debug/*"
+          cd custom_components/schulmanager
+          zip -r ../../schulmanager-${{ steps.version.outputs.version }}.zip . -x "*.pyc" "__pycache__/*" "debug/*"
 
-      - name: Upload release asset
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release v${{ steps.version.outputs.version }}
+          body_path: release_notes.txt
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: schulmanager-${{ github.event.release.tag_name }}.zip
-          asset_name: schulmanager-${{ github.event.release.tag_name }}.zip
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: schulmanager-${{ steps.version.outputs.version }}.zip
+          asset_name: schulmanager-${{ steps.version.outputs.version }}.zip
           asset_content_type: application/zip

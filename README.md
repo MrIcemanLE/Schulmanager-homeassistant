@@ -44,6 +44,29 @@ Nach der Installation kannst du die Integration über die Home Assistant UI konf
 - **Zeitbereich**: Tage in Vergangenheit/Zukunft
 - **Manuelle Aktualisierung**: Abkühlzeit 5-30 Minuten
 
+## Entwicklung & Versioning
+
+Diese Integration folgt [Semantic Versioning](https://semver.org/). Alle Änderungen werden in der [CHANGELOG.md](CHANGELOG.md) dokumentiert.
+
+### Release-Prozess
+
+Für Entwickler, die zur Integration beitragen möchten:
+
+```bash
+# Patch-Release (Bugfixes)
+./scripts/release.sh patch "Fixed calendar sync issue"
+
+# Minor-Release (Neue Features)
+./scripts/release.sh minor "Added support for exam grades"
+
+# Major-Release (Breaking changes)
+./scripts/release.sh major "Restructured sensor entities"
+```
+
+### Version-History
+
+Siehe [CHANGELOG.md](CHANGELOG.md) für eine detaillierte Liste aller Änderungen.
+
 ## Unterstützung
 
 Bei Problemen oder Fragen erstelle bitte ein Issue auf GitHub.
