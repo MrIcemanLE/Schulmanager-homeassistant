@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Schulmanager",
+        "description": "Sign in with your Schulmanager credentials.",
+        "data": {
+          "username": "E-mail",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unknown error"
+    },
+    "abort": {}
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Schulmanager Options",
+        "data": {
+          "poll_interval": "Polling interval (seconds)",
+          "enable_homework": "Fetch homework",
+          "enable_schedule": "Fetch schedule",
+          "enable_exams": "Fetch exams",
+          "range_past_days": "Days in the past",
+          "range_future_days": "Days in the future",
+          "debug_dumps": "Write debug dumps"
+        }
+      }
+    }
+  }
+}

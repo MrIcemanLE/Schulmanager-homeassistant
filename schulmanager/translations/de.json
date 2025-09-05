@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Schulmanager verbinden",
+        "description": "Melde dich mit deinen Schulmanager-Zugangsdaten an.",
+        "data": {
+          "username": "E-Mail",
+          "password": "Passwort"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Anmeldung fehlgeschlagen",
+      "unknown": "Unbekannter Fehler"
+    },
+    "abort": {}
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Schulmanager Optionen",
+        "data": {
+          "auto_update_interval": "Automatisches Update-Intervall (Stunden, 1-6)",
+          "poll_interval": "Legacy Abrufintervall (Sekunden)",
+          "enable_homework": "Hausaufgaben abrufen",
+          "enable_schedule": "Stundenplan abrufen",
+          "enable_exams": "Arbeiten abrufen",
+          "enable_grades": "Noten abrufen",
+          "range_past_days": "Tage in der Vergangenheit",
+          "range_future_days": "Tage in der Zukunft",
+          "refresh_cooldown": "Manuelle Aktualisierung Abkühlzeit (Minuten, 5-30)",
+          "debug_dumps": "Debug-Dumps schreiben"
+        }
+      }
+    }
+  }
+}

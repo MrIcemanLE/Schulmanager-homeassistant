@@ -1,0 +1,10 @@
+
+clear_cache:
+  name: Cache leeren
+  description: Löscht Sitzungsdaten/Cache der Schulmanager-Integration.
+refresh:
+  name: Manuell aktualisieren
+  description: Startet sofortigen Abruf (respektiert Cooldown-Regeln).
+clear_debug:
+  name: Debug-Ordner leeren
+  description: Löscht alle Debug-Dateien im Integrationsordner.
