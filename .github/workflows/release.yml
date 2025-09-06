@@ -14,11 +14,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
 
       - name: Get version
         id: version
         run: |
           version=${GITHUB_REF#refs/tags/v}
+          echo "Extracted version: $version"
           echo "version=$version" >> $GITHUB_OUTPUT
 
       - name: Extract changelog
@@ -26,17 +32,28 @@ jobs:
         run: |
           # Extract the changelog for this version
           if [ -f CHANGELOG.md ]; then
-            awk "/^## \[${{ steps.version.outputs.version }}\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md > release_notes.txt
+            # Use sed to extract the section for this version
+            sed -n "/^## \[${{ steps.version.outputs.version }}\]/,/^## \[/p" CHANGELOG.md | sed '$d' | tail -n +2 > release_notes.txt
+            # If the extraction is empty, use a default message
+            if [ ! -s release_notes.txt ]; then
+              echo "Release v${{ steps.version.outputs.version }}" > release_notes.txt
+            fi
           else
             echo "Release v${{ steps.version.outputs.version }}" > release_notes.txt
           fi
 
       - name: Validate manifest version
         run: |
+          echo "Checking if custom_components/schulmanager/manifest.json exists..."
+          ls -la custom_components/schulmanager/manifest.json
           manifest_version=$(cat custom_components/schulmanager/manifest.json | jq -r '.version')
+          echo "Manifest version: $manifest_version"
+          echo "Tag version: ${{ steps.version.outputs.version }}"
           if [ "$manifest_version" != "${{ steps.version.outputs.version }}" ]; then
             echo "Error: Manifest version ($manifest_version) does not match tag version (${{ steps.version.outputs.version }})"
             exit 1
+          else
+            echo "Version validation passed!"
           fi
 
       - name: Zip integration
@@ -45,22 +62,12 @@ jobs:
           zip -r ../../schulmanager-${{ steps.version.outputs.version }}.zip . -x "*.pyc" "__pycache__/*" "debug/*"
 
       - name: Create Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
           body_path: release_notes.txt
+          files: schulmanager-${{ steps.version.outputs.version }}.zip
           draft: false
           prerelease: false
-
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: schulmanager-${{ steps.version.outputs.version }}.zip
-          asset_name: schulmanager-${{ steps.version.outputs.version }}.zip
-          asset_content_type: application/zip
