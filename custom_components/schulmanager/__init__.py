@@ -10,6 +10,7 @@ from homeassistant.helpers.device_registry import async_get as async_get_device_
 
 from .const import (
     DOMAIN,
+    VERSION,
     OPT_POLL_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     OPT_DEBUG_DUMPS,
@@ -62,7 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             name=student["name"],
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version="2025.1",
+            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
         )

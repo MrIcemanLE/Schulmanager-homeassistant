@@ -1,8 +1,23 @@
 # custom_components/schulmanager/const.py
 from __future__ import annotations
 from typing import Final
+import json
+from pathlib import Path
 
 DOMAIN: Final = "schulmanager"
+
+# Version aus manifest.json laden
+def _get_version() -> str:
+    """Load version from manifest.json."""
+    try:
+        manifest_path = Path(__file__).parent / "manifest.json"
+        with manifest_path.open() as f:
+            manifest = json.load(f)
+            return manifest.get("version", "unknown")
+    except Exception:
+        return "unknown"
+
+VERSION: Final = _get_version()
 
 # Credentials
 CONF_USERNAME: Final = "username"

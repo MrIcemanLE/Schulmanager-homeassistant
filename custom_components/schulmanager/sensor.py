@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.typing import StateType
 
-from .const import DOMAIN
+from .const import DOMAIN, VERSION
 from .util import normalize_student_slug
 
 
@@ -39,10 +39,13 @@ async def async_setup_entry(
         for subject_id, subject_data in subjects.items():
             subject_name = subject_data.get("name", f"Fach {subject_id}")
             subject_abbrev = subject_data.get("abbreviation", subject_name)
-            entities.append(GradeSensor(hub, coord, sid, name, subject_id, subject_name, subject_abbrev))
+            entities.append(GradeSensor(hub, coord, sid, name, slug, subject_id, subject_name, subject_abbrev))
 
         # Add overall average sensor
-        entities.append(OverallGradeSensor(hub, coord, sid, name))
+        entities.append(OverallGradeSensor(hub, coord, sid, name, slug))
+        
+        # Add days until next exam sensor
+        entities.append(NextExamCountdownSensor(hub, coord, sid, name, slug))
 
     async_add_entities(entities)
 
@@ -62,7 +65,7 @@ class ScheduleSensor(SensorEntity):
         self.day = day
         self._attr_unique_id = f"schulmanager_{slug}_stundenplan_{day}"
         pretty = "heute" if day == "today" else "morgen"
-        self._attr_name = f"{student_name} Stundenplan {pretty}"
+        self._attr_name = f"Stundenplan {pretty}"
         self._attr_icon = "mdi:school-outline"
 
     @property
@@ -73,7 +76,7 @@ class ScheduleSensor(SensorEntity):
             name=self.student_name,
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version="2025.1",
+            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
         )
@@ -246,7 +249,7 @@ class ScheduleChangesSensor(SensorEntity):
         self.student_id = student_id
         self.student_name = student_name
         self._attr_unique_id = f"schulmanager_{slug}_stundenplan_changes"
-        self._attr_name = f"{student_name} Stundenplan Änderungen"
+        self._attr_name = "Stundenplan Änderungen"
         self._attr_icon = "mdi:calendar-alert"
 
     @property
@@ -257,7 +260,7 @@ class ScheduleChangesSensor(SensorEntity):
             name=self.student_name,
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version="2025.1",
+            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
         )
@@ -350,7 +353,7 @@ class GradeSensor(SensorEntity):
     _attr_suggested_display_precision = 2
 
     def __init__(
-        self, hub: Any, coordinator: Any, student_id: str, student_name: str, subject_id: str, subject_name: str, subject_abbrev: str
+        self, hub: Any, coordinator: Any, student_id: str, student_name: str, slug: str, subject_id: str, subject_name: str, subject_abbrev: str
     ) -> None:
         """Initialize the grade sensor."""
         self.hub = hub
@@ -361,11 +364,10 @@ class GradeSensor(SensorEntity):
         self.subject_name = subject_name
         self.subject_abbrev = subject_abbrev
         
-        # Create reliable entity ID using student name slug and subject abbreviation for reconnection
+        # Use consistent slug from function parameter and normalize subject abbreviation
         import re
-        student_slug = re.sub(r'[^a-zA-Z0-9]', '_', student_name.lower())
         subject_slug = re.sub(r'[^a-zA-Z0-9]', '_', subject_abbrev.lower())
-        self._attr_unique_id = f"schulmanager_{student_slug}_noten_{subject_slug}"
+        self._attr_unique_id = f"schulmanager_{slug}_noten_{subject_slug}"
         
         # Simple name: just "Noten" + subject abbreviation (device connection shows student)
         self._attr_name = f"Noten {subject_abbrev}"
@@ -414,7 +416,7 @@ class GradeSensor(SensorEntity):
             name=self.student_name,
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version="2025.1",
+            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
         )
@@ -527,7 +529,7 @@ class OverallGradeSensor(SensorEntity):
     _attr_suggested_display_precision = 2
 
     def __init__(
-        self, hub: Any, coordinator: Any, student_id: str, student_name: str
+        self, hub: Any, coordinator: Any, student_id: str, student_name: str, slug: str
     ) -> None:
         """Initialize the overall grade sensor."""
         self.hub = hub
@@ -535,10 +537,8 @@ class OverallGradeSensor(SensorEntity):
         self.student_id = student_id
         self.student_name = student_name
         
-        # Create reliable entity ID using student name slug
-        import re
-        student_slug = re.sub(r'[^a-zA-Z0-9]', '_', student_name.lower())
-        self._attr_unique_id = f"schulmanager_{student_slug}_noten_gesamt"
+        # Use consistent slug from function parameter
+        self._attr_unique_id = f"schulmanager_{slug}_noten_gesamt"
         
         # Simple name: "Noten Gesamt" 
         self._attr_name = "Noten Gesamt"
@@ -587,7 +587,7 @@ class OverallGradeSensor(SensorEntity):
             name=self.student_name,
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version="2025.1",
+            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
         )
@@ -644,5 +644,171 @@ class OverallGradeSensor(SensorEntity):
             "total_subjects": grades_data.get("total_subjects", 0),
             "subjects_with_grades": grades_data.get("subjects_with_grades", 0),
             "subject_averages": subject_averages,
+            "last_updated": datetime.now().isoformat()
+        }
+
+
+class NextExamCountdownSensor(SensorEntity):
+    """Sensor entity showing days until next exam."""
+
+    _attr_has_entity_name = True
+    _attr_native_unit_of_measurement = "Tage"
+    _attr_state_class = None
+
+    def __init__(
+        self, hub: Any, coordinator: Any, student_id: str, student_name: str, slug: str
+    ) -> None:
+        """Initialize the next exam countdown sensor."""
+        self.hub = hub
+        self.coordinator = coordinator
+        self.student_id = student_id
+        self.student_name = student_name
+        
+        # Create unique entity ID
+        self._attr_unique_id = f"schulmanager_{slug}_tage_bis_naechste_arbeit"
+        
+        # Simple name: "Tage bis nächste Arbeit"
+        self._attr_name = "Tage bis nächste Arbeit"
+        self._attr_icon = "mdi:calendar-clock"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"student_{self.student_id}")},
+            name=self.student_name,
+            manufacturer="Schulmanager Online",
+            model="Schüler",
+            sw_version=VERSION,
+            suggested_area="Schule",
+            configuration_url="https://login.schulmanager-online.de/",
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return bool(self.coordinator.last_update_success)
+
+    @property
+    def native_value(self) -> StateType:
+        """Return days until next exam."""
+        items = (self.coordinator.data or {}).get("exams", {}).get(self.student_id, [])
+        if not items:
+            return None
+        
+        # Get current date
+        now = datetime.now().date()
+        
+        # Find the next upcoming exam
+        next_exam_date = None
+        for exam in items:
+            exam_date = exam.get("date")
+            if not exam_date:
+                continue
+                
+            try:
+                # Parse the date (should be YYYY-MM-DD format)
+                if "T" in exam_date:
+                    exam_date_obj = datetime.fromisoformat(exam_date).date()
+                else:
+                    exam_date_obj = datetime.fromisoformat(exam_date).date()
+                
+                # Only consider future exams
+                if exam_date_obj >= now:
+                    if next_exam_date is None or exam_date_obj < next_exam_date:
+                        next_exam_date = exam_date_obj
+                        
+            except (ValueError, TypeError):
+                try:
+                    exam_date_obj = datetime.strptime(exam_date, "%Y-%m-%d").date()
+                    if exam_date_obj >= now:
+                        if next_exam_date is None or exam_date_obj < next_exam_date:
+                            next_exam_date = exam_date_obj
+                except (ValueError, TypeError):
+                    continue
+        
+        # Calculate days until next exam
+        if next_exam_date:
+            days_until = (next_exam_date - now).days
+            return days_until
+        
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional exam information."""
+        items = (self.coordinator.data or {}).get("exams", {}).get(self.student_id, [])
+        if not items:
+            return {
+                "next_exam": None,
+                "total_upcoming_exams": 0,
+                "last_updated": datetime.now().isoformat()
+            }
+        
+        # Get current date
+        now = datetime.now().date()
+        
+        # Find next exam and collect upcoming exams
+        next_exam = None
+        next_exam_date = None
+        upcoming_exams = []
+        
+        for exam in items:
+            exam_date = exam.get("date")
+            if not exam_date:
+                continue
+                
+            try:
+                # Parse the date
+                if "T" in exam_date:
+                    exam_date_obj = datetime.fromisoformat(exam_date).date()
+                else:
+                    exam_date_obj = datetime.fromisoformat(exam_date).date()
+                
+                # Only consider future exams
+                if exam_date_obj >= now:
+                    # Add to upcoming list
+                    exam_info = {
+                        "date": exam_date_obj.isoformat(),
+                        "days_from_now": (exam_date_obj - now).days,
+                        "subject": exam.get("subject", {}).get("name", "Unbekanntes Fach"),
+                        "subject_abbr": exam.get("subject", {}).get("abbreviation", ""),
+                        "type": exam.get("type", {}).get("name", "Prüfung"),
+                        "comment": exam.get("comment", "")
+                    }
+                    upcoming_exams.append(exam_info)
+                    
+                    # Check if this is the next exam
+                    if next_exam_date is None or exam_date_obj < next_exam_date:
+                        next_exam_date = exam_date_obj
+                        next_exam = exam_info
+                        
+            except (ValueError, TypeError):
+                try:
+                    exam_date_obj = datetime.strptime(exam_date, "%Y-%m-%d").date()
+                    if exam_date_obj >= now:
+                        exam_info = {
+                            "date": exam_date_obj.isoformat(),
+                            "days_from_now": (exam_date_obj - now).days,
+                            "subject": exam.get("subject", {}).get("name", "Unbekanntes Fach"),
+                            "subject_abbr": exam.get("subject", {}).get("abbreviation", ""),
+                            "type": exam.get("type", {}).get("name", "Prüfung"),
+                            "comment": exam.get("comment", "")
+                        }
+                        upcoming_exams.append(exam_info)
+                        
+                        if next_exam_date is None or exam_date_obj < next_exam_date:
+                            next_exam_date = exam_date_obj
+                            next_exam = exam_info
+                except (ValueError, TypeError):
+                    continue
+        
+        # Sort upcoming exams by date
+        upcoming_exams.sort(key=lambda x: x["date"])
+        
+        return {
+            "next_exam": next_exam,
+            "total_upcoming_exams": len(upcoming_exams),
+            "upcoming_exams": upcoming_exams[:5],  # Show next 5 exams
             "last_updated": datetime.now().isoformat()
         }

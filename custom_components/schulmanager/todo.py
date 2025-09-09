@@ -12,7 +12,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, VERSION
 from .util import normalize_student_slug
 
 _LOGGER = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ class HomeworkTodoList(CoordinatorEntity, TodoListEntity):
             name=self.student_name,
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version="2025.1",
+            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
         )

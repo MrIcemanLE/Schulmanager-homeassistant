@@ -10,7 +10,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import DOMAIN, VERSION
 from .util import normalize_student_slug
 
 
@@ -46,7 +46,7 @@ class ExamsCalendar(CalendarEntity):
         self.student_id = student_id
         self.student_name = student_name
         self._attr_unique_id = f"schulmanager_{slug}_arbeiten"
-        self._attr_name = f"{student_name} Arbeiten"
+        self._attr_name = "Arbeiten"
         self._attr_icon = "mdi:book-education"
 
     @property
@@ -246,7 +246,7 @@ class ExamsCalendar(CalendarEntity):
             name=self.student_name,
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version="2025.1",
+            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
         )
