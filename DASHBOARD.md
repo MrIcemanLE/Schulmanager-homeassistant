@@ -19,9 +19,9 @@ Nach der Installation der Integration stehen folgende Entitäten zur Verfügung:
 - `sensor.SCHUELERNAME_stundenplan_morgen` - Stundenplan für morgen
 - `sensor.SCHUELERNAME_stundenplan_changes` - Stundenplanänderungen
 
-### Prüfungen & Noten
-- `sensor.SCHUELERNAME_tage_bis_naechste_arbeit` - Tage bis zur nächsten Prüfung
-- `calendar.SCHUELERNAME_arbeiten` - Kalender mit Prüfungsterminen
+### Arbeiten & Noten
+- `sensor.SCHUELERNAME_tage_bis_naechste_arbeit` - Tage bis zur nächsten Arbeit
+- `calendar.SCHUELERNAME_arbeiten` - Kalender mit Arbeiten
 - `sensor.SCHUELERNAME_noten_gesamt` - Gesamtdurchschnitt
 - `sensor.SCHUELERNAME_noten_FACH` - Noten pro Fach
 
@@ -127,7 +127,7 @@ Nach der Installation der Integration stehen folgende Entitäten zur Verfügung:
       cards:
         - type: entity
           entity: sensor.SCHUELERNAME_tage_bis_naechste_arbeit
-          name: "Nächste Prüfung"
+          name: "Nächste Arbeit"
           icon: mdi:calendar-clock
         - type: entity
           entity: sensor.SCHUELERNAME_stundenplan_changes
@@ -175,7 +175,7 @@ Nach der Installation der Integration stehen folgende Entitäten zur Verfügung:
           icon: mdi:calendar-tomorrow
         - type: entity
           entity: sensor.SCHUELERNAME_tage_bis_naechste_arbeit
-          name: "Tage bis Prüfung"
+          name: "Tage bis Arbeit"
           icon: mdi:calendar-clock
 
     # Heutiger Stundenplan - Flex Table
@@ -305,7 +305,7 @@ view:
           icon: mdi:calendar-today
         - type: entity
           entity: sensor.SCHUELERNAME_tage_bis_naechste_arbeit
-          name: "Tage bis Prüfung"
+          name: "Tage bis Arbeit"
           icon: mdi:calendar-clock
         - type: entity
           entity: sensor.SCHUELERNAME_noten_gesamt
@@ -431,9 +431,9 @@ view:
               background-color: rgba(255, 165, 0, 0.05);
             }
 
-    # Kommende Prüfungen
+    # Kommende Arbeiten
     - type: entities
-      title: "📝 Kommende Prüfungen"
+      title: "📝 Kommende Arbeiten"
       entities:
         - entity: sensor.SCHUELERNAME_tage_bis_naechste_arbeit
           secondary_info: |
@@ -441,7 +441,7 @@ view:
             {% if next_exam %}
             {{ next_exam.subject }} ({{ next_exam.type }}) - {{ next_exam.date }}
             {% else %}
-            Keine anstehenden Prüfungen
+            Keine anstehenden Arbeiten
             {% endif %}
         - type: divider
         - entity: calendar.SCHUELERNAME_arbeiten

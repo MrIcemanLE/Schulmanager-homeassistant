@@ -2,6 +2,11 @@
 
 Eine Home Assistant Integration für Schulmanager Online, um Schulinformationen wie Stundenplan, Hausaufgaben, Arbeiten und Noten abzurufen.
 
+> **⚠️ BETA-VERSION**  
+> Diese Integration befindet sich noch in einem frühen Beta-Stadium. Es können Fehler auftreten und Funktionen können sich noch ändern. Verwenden Sie die Integration auf eigene Verantwortung und melden Sie Probleme über GitHub Issues.
+> 
+> **Aktuelle Version:** 0.1.0 (Beta)
+
 ## Installation über HACS
 
 1. Öffne HACS in Home Assistant
@@ -32,9 +37,9 @@ Nach der Installation kannst du die Integration über die Home Assistant UI konf
 
 - 📅 **Stundenplan**: Aktuelle und kommende Stunden mit Änderungserkennung
 - 📝 **Hausaufgaben**: Anstehende Aufgaben mit Details und Todo-Integration
-- 📊 **Arbeiten/Klausuren**: Geplante Prüfungen mit Countdown-Funktion
+- 📊 **Arbeiten/Klausuren**: Geplante Arbeiten mit Countdown-Funktion
 - 🎯 **Noten**: Aktuelle Noten nach Fächern mit Gesamtdurchschnitt
-- ⏰ **Prüfungsalarm**: Sensor zeigt Tage bis zur nächsten Prüfung
+- ⏰ **Arbeitsalarm**: Sensor zeigt Tage bis zur nächsten Arbeit
 - 🔄 **Automatische Updates**: Konfigurierbare Update-Intervalle
 - 🌍 **Deutsche Lokalisierung**: Vollständig auf Deutsch verfügbar
 
@@ -45,8 +50,8 @@ Die Integration stellt verschiedene Sensoren und Kalender bereit, die auf dem Ho
 **📋 Verfügbare Entitäten:**
 - `sensor.SCHUELERNAME_stundenplan_heute` - Heutiger Stundenplan
 - `sensor.SCHUELERNAME_stundenplan_morgen` - Stundenplan für morgen  
-- `sensor.SCHUELERNAME_tage_bis_naechste_arbeit` - ⭐ **NEU**: Countdown bis zur nächsten Prüfung
-- `calendar.SCHUELERNAME_arbeiten` - Kalender mit Prüfungsterminen
+- `sensor.SCHUELERNAME_tage_bis_naechste_arbeit` - ⭐ **NEU**: Countdown bis zur nächsten Arbeit
+- `calendar.SCHUELERNAME_arbeiten` - Kalender mit Arbeiten
 - `todo.SCHUELERNAME_hausaufgaben` - Hausaufgaben als Todo-Liste
 
 **🎨 Dashboard-Konfigurationen:**
