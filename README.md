@@ -30,12 +30,36 @@ Nach der Installation kannst du die Integration über die Home Assistant UI konf
 
 ## Features
 
-- 📅 **Stundenplan**: Aktuelle und kommende Stunden
-- 📝 **Hausaufgaben**: Anstehende Aufgaben mit Details
-- 📊 **Arbeiten/Klausuren**: Geplante Prüfungen
+- 📅 **Stundenplan**: Aktuelle und kommende Stunden mit Änderungserkennung
+- 📝 **Hausaufgaben**: Anstehende Aufgaben mit Details und Todo-Integration
+- 📊 **Arbeiten/Klausuren**: Geplante Prüfungen mit Countdown-Funktion
 - 🎯 **Noten**: Aktuelle Noten nach Fächern mit Gesamtdurchschnitt
+- ⏰ **Prüfungsalarm**: Sensor zeigt Tage bis zur nächsten Prüfung
 - 🔄 **Automatische Updates**: Konfigurierbare Update-Intervalle
 - 🌍 **Deutsche Lokalisierung**: Vollständig auf Deutsch verfügbar
+
+## 📊 Dashboard Integration
+
+Die Integration stellt verschiedene Sensoren und Kalender bereit, die auf dem Home Assistant Dashboard angezeigt werden können. 
+
+**📋 Verfügbare Entitäten:**
+- `sensor.SCHUELERNAME_stundenplan_heute` - Heutiger Stundenplan
+- `sensor.SCHUELERNAME_stundenplan_morgen` - Stundenplan für morgen  
+- `sensor.SCHUELERNAME_tage_bis_naechste_arbeit` - ⭐ **NEU**: Countdown bis zur nächsten Prüfung
+- `calendar.SCHUELERNAME_arbeiten` - Kalender mit Prüfungsterminen
+- `todo.SCHUELERNAME_hausaufgaben` - Hausaufgaben als Todo-Liste
+
+**🎨 Dashboard-Konfigurationen:**
+
+Wir stellen drei vorgefertigte Dashboard-Konfigurationen bereit:
+
+| Option | Schwierigkeit | Features |
+|--------|--------------|----------|
+| **Standard Markdown** | ⭐ Einfach | Sofort einsatzbereit, keine zusätzliche Installation |
+| **Flex Table Card** | ⭐⭐ Mittel | Erweiterte Tabellenfunktionen, HACS erforderlich |
+| **Komplettes Dashboard** | ⭐⭐⭐ Fortgeschritten | Vollständige Schul-Übersicht mit allen Features |
+
+➡️ **[Zur detaillierten Dashboard-Anleitung (DASHBOARD.md)](DASHBOARD.md)**
 
 ## Konfigurationsoptionen
 
