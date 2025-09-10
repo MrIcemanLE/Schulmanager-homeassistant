@@ -14,6 +14,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 ### Security
 
+## [0.3.0] - 2025-01-09
+
+### 🏗️ BREAKING CHANGES
+- **Device Architecture Redesigned**: Integration now uses service-based device hierarchy
+  - Main "Schulmanager Online" service device with student sub-devices
+  - **⚠️ Migration required**: Delete old integration, restart HA, reinstall
+  - See [MIGRATION_0.3.0.md](MIGRATION_0.3.0.md) for detailed instructions
+
+### Added
+- Service-based device hierarchy for better organization
+- Migration guide for 0.3.0 upgrade ([MIGRATION_0.3.0.md](MIGRATION_0.3.0.md))
+- Enhanced device registry management with proper linking
+- Future-proof compliance with Home Assistant Core 2026.9
+
+### Changed
+- `manifest.json`: Integration type changed from "hub" to "service"
+- Device creation logic updated to create proper parent-child relationships
+- Button entity now properly linked to service device
+- Improved device registry persistence and cleanup
+
+### Fixed
+- Fixed YAML code block formatting in DASHBOARD.md - all code examples now render correctly
+- Device registry persistence issues resolved
+- Proper device hierarchy now saves correctly to registry
+- Service device creation and student linking improved
+
+### Technical
+- Compliant with `suggested_area` deprecation guidelines (HA Core 2026.9)
+- No musllinux wheels required (pure Python dependencies)
+- Enhanced device-entity relationship management
+
 ## [0.2.0] - 2025-01-06
 
 ### Added
@@ -60,6 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Localization**: German and English translations
 - **Reliability**: Automatic retry logic and error recovery
 
-[Unreleased]: https://github.com/MrIcemanLE/Schulmanager-homeassistant/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/MrIcemanLE/Schulmanager-homeassistant/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/MrIcemanLE/Schulmanager-homeassistant/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/MrIcemanLE/Schulmanager-homeassistant/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/MrIcemanLE/Schulmanager-homeassistant/releases/tag/v0.1.0

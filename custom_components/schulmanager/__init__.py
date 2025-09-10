@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.device_registry import async_get as async_get_device_registry
+from homeassistant.helpers.device_registry import async_get as async_get_device_registry, DeviceInfo, DeviceEntryType
 
 from .const import (
     DOMAIN,
@@ -54,10 +54,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.exception("Failed to initialize Schulmanager")
         raise ConfigEntryNotReady from e
 
-    # Create or update device entries for students early in the setup process
+    # Create the main Schulmanager service device
     device_registry = async_get_device_registry(hass)
+    
+    # Main service device
+    service_device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"service_{entry.entry_id}")},
+        name="Schulmanager Online",
+        manufacturer="Schulmanager Online",
+        model="Portal-Zugang",
+        sw_version=VERSION,
+        entry_type=DeviceEntryType.SERVICE,
+        suggested_area="Schule",
+        configuration_url="https://login.schulmanager-online.de/",
+    )
+    _LOGGER.info("Service device created with ID: %s, identifiers: %s", service_device.id, service_device.identifiers)
+    
+    # Student devices linked to the service
     for student in hub._students:
-        device_entry = device_registry.async_get_or_create(
+        student_device = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, f"student_{student['id']}")},
             name=student["name"],
@@ -66,16 +82,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
+            # Link student to service device
+            via_device=(DOMAIN, f"service_{entry.entry_id}"),
         )
 
+        # Ensure the device is properly linked to the service device and config entry
+        device_registry.async_update_device(
+            student_device.id,
+            via_device_id=service_device.id,
+        )
+        _LOGGER.info("Student device %s updated with via_device_id: %s", student_device.name, service_device.id)
+
         # If device was orphaned, make sure it's properly linked to this config entry
-        if entry.entry_id not in device_entry.config_entries:
+        if entry.entry_id not in student_device.config_entries:
             device_registry.async_update_device(
-                device_entry.id,
+                student_device.id,
                 add_config_entry_id=entry.entry_id
             )
 
-    _LOGGER.info("Created device entries for %d students", len(hub._students))
+    _LOGGER.info("Created service device and %d student devices", len(hub._students))
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "hub": hub,
