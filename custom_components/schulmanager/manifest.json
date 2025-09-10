@@ -1,7 +1,7 @@
 {
   "domain": "schulmanager",
   "name": "Schulmanager Online",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "documentation": "https://github.com/MrIcemanLE/Schulmanager-homeassistant/blob/main/README.md",
   "issue_tracker": "https://github.com/MrIcemanLE/Schulmanager-homeassistant/issues",
   "requirements": [

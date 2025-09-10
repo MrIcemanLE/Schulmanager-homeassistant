@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 ### Security
 
+## [0.3.0] - 2025-09-10
+
+### Changed
+- Manifest: Integrationstyp von "service" auf "hub" geändert; Metadaten konsolidiert
+- Button: Geräteinfos für Service-Gerät entfernt; Cooldown-Attribute vereinfacht (direkt aus Koordinator) und letzte manuelle Aktualisierung als ISO-Zeitstempel
+- Einrichtung (__init__): Kein separates Service-Gerät mehr; es werden nur noch Geräte pro Schüler angelegt; Entfernt Verknüpfung "via_device"
+- Allgemein: Logging und Geräteverwaltung aufgeräumt
+
+### Removed
+- Virtuelles Service-Gerät und "via_device"-Link zwischen Service und Schüler-Geräten
+
 ## [0.2.0] - 2025-01-06
 
 ### Added
@@ -60,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Localization**: German and English translations
 - **Reliability**: Automatic retry logic and error recovery
 
-[Unreleased]: https://github.com/MrIcemanLE/Schulmanager-homeassistant/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/MrIcemanLE/Schulmanager-homeassistant/compare/v0.3.0...HEAD
 [0.2.0]: https://github.com/MrIcemanLE/Schulmanager-homeassistant/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/MrIcemanLE/Schulmanager-homeassistant/releases/tag/v0.1.0
+[0.3.0]: https://github.com/MrIcemanLE/Schulmanager-homeassistant/compare/v0.2.0...v0.3.0
