@@ -8,6 +8,14 @@
           "username": "E-mail",
           "password": "Password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Schulmanager",
+        "description": "Please re-enter your credentials to restore access.",
+        "data": {
+          "username": "E-mail",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -17,7 +25,8 @@
       "unknown": "Unknown error"
     },
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Reauthentication was successful"
     }
   },
   "options": {
@@ -25,8 +34,6 @@
       "init": {
         "title": "Schulmanager Options",
         "data": {
-          "auto_update_interval": "Automatic update interval (hours, 1-6)",
-          "poll_interval": "Legacy polling interval (seconds)",
           "enable_homework": "Fetch homework",
           "enable_schedule": "Fetch schedule", 
           "enable_exams": "Fetch exams",

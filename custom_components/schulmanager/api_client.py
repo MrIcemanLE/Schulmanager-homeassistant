@@ -1,21 +1,29 @@
+"""HTTP client and API helpers for Schulmanager Online service.
+
+Note: Some broad exception handling is left intentionally due to the
+variability of upstream responses. Where appropriate, we dump sanitized
+payloads for diagnostics. Ruff warnings for BLE001/B904 can be tuned
+later if we further constrain error types upstream.
+"""
+
+# ruff: noqa: BLE001, B904
+
 from __future__ import annotations
 
+from datetime import timedelta
+import hashlib
 import json
 import logging
+from pathlib import Path
 import re
-import hashlib
-from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
-from .utils import (
-    common_headers,
-    sanitize_for_log,
-    ensure_authenticated,
-)
+from .types import GradesPayload, SchedulePayload
+from .utils import common_headers, ensure_authenticated, sanitize_for_log
 
 LOGIN_URL = "https://login.schulmanager-online.de/api/login"
 GET_SALT_URL = "https://login.schulmanager-online.de/api/get-salt"
@@ -25,8 +33,8 @@ INDEX_URL = "https://login.schulmanager-online.de/"
 _LOGGER = logging.getLogger(__name__)
 
 
-class SchulmanagerHub:
-    """Main hub for communicating with Schulmanager Online."""
+class SchulmanagerClient:
+    """Service client for communicating with Schulmanager Online."""
 
     def __init__(
         self,
@@ -35,6 +43,7 @@ class SchulmanagerHub:
         password: str,
         debug_dumps: bool = False,
     ) -> None:
+        """Initialize the service client with credentials and HA context."""
         self.hass = hass
         self.username = username
         self.password = password
@@ -49,13 +58,15 @@ class SchulmanagerHub:
         """Save debug data to file if debug dumps are enabled."""
         if not self.debug_dumps:
             return
-        path = self.hass.config.path("custom_components", "schulmanager", "debug", name)
+        lname = name.lower()
+        if "response" not in lname:
+            return
+        base = Path(self.hass.config.path("custom_components", "schulmanager", "debug"))
+        file_path = base / name
 
         def _write() -> None:
-            import os
-
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
+            base.mkdir(parents=True, exist_ok=True)
+            with file_path.open("w", encoding="utf-8") as f:
                 json.dump(
                     {"fetched_at": dt_util.utcnow().isoformat(), "data": data},
                     f,
@@ -64,6 +75,43 @@ class SchulmanagerHub:
                 )
 
         await self.hass.async_add_executor_job(_write)
+
+    # Public helpers to avoid private attribute access outside
+    def get_students(self) -> list[dict[str, Any]]:
+        """Return the discovered students for this account."""
+        return list(self._students)
+
+    def clear_auth_cache(self) -> None:
+        """Clear cached authentication and bundle version."""
+        self._token = None
+        self._bundle_version = None
+
+    def auth_token(self) -> str | None:
+        """Return the current auth token if available."""
+        return self._token
+
+    def bundle_version(self) -> str | None:
+        """Return the current bundle version if available."""
+        return self._bundle_version
+
+    async def async_discover_bundle_version(self) -> str | None:
+        """Discover and cache bundle version if missing; return it."""
+        if not self._bundle_version:
+            self._bundle_version = await self._discover_bundle_version()
+        return self._bundle_version
+
+    async def async_dump(self, name: str, data: Any) -> None:
+        """Public alias for debug dump to avoid private access in callers."""
+        await self._dump(name, data)
+
+    # Convenience helpers
+    def has_token(self) -> bool:
+        """Return True if an auth token is available."""
+        return self._token is not None
+
+    def has_bundle_version(self) -> bool:
+        """Return True if bundle version is available."""
+        return self._bundle_version is not None
 
     async def _fetch_salt(self, email: str) -> str:
         """Fetch salt for password hashing."""
@@ -192,7 +240,7 @@ class SchulmanagerHub:
 
             # Find script tags
             for m in re.finditer(
-                r'<script[^>]+src=["\']([^"\']+\.js)[^>]*>', html, re.I
+                r'<script[^>]+src=["\']([^"\']+\.js)[^>]*>', html, re.IGNORECASE
             ):
                 src = m.group(1)
                 if src.startswith("/"):
@@ -207,7 +255,7 @@ class SchulmanagerHub:
             for m in re.finditer(
                 r'<link[^>]+rel=["\']modulepreload["\'][^>]+href=["\']([^"\']+\.js)["\']',
                 html,
-                re.I,
+                re.IGNORECASE,
             ):
                 src = m.group(1)
                 if src.startswith("/"):
@@ -221,10 +269,10 @@ class SchulmanagerHub:
         await self._dump("index_scripts.json", scripts)
 
         # Search patterns for bundle version
-        literal_pat = re.compile(r'bundleVersion\s*:\s*["\']([a-f0-9]{10})["\']', re.I)
+        literal_pat = re.compile(r'bundleVersion\s*:\s*["\']([a-f0-9]{10})["\']', re.IGNORECASE)
         ident_pat = re.compile(r"bundleVersion\s*:\s*([A-Za-z_$][\w$]*)")
         near_pat = re.compile(
-            r'bundleVersion[\s\S]{0,120}?["\']([a-f0-9]{10})["\']', re.I
+            r'bundleVersion[\s\S]{0,120}?["\']([a-f0-9]{10})["\']', re.IGNORECASE
         )
 
         for url in scripts:
@@ -248,8 +296,7 @@ class SchulmanagerHub:
                 if m:
                     ident = m.group(1)
                     def_pat = re.compile(
-                        r'\b(?:const|let|var)\s+%s\s*=\s*["\']([a-f0-9]{10})["\']'
-                        % re.escape(ident)
+                        rf'\b(?:const|let|var)\s+{re.escape(ident)}\s*=\s*["\']([a-f0-9]{{10}})["\']'
                     )
                     m2 = def_pat.search(js)
                     if m2:
@@ -377,7 +424,7 @@ class SchulmanagerHub:
         return data if isinstance(data, list) else []
 
     async def fetch_exams(
-        self, student_id: str, class_id: int | None = None, date_range_config: dict[str, int] | None = None  # noqa: ARG002
+        self, student_id: str, class_id: int | None = None, date_range_config: dict[str, int] | None = None
     ) -> list[dict]:
         """Fetch exams for a student using the proper exams API with user-configured date range."""
         # Get student info for complete API call
@@ -403,13 +450,13 @@ class SchulmanagerHub:
             future_days = date_range_config.get("future_days", 180)
             start_date = today - timedelta(days=past_days)
             end_date = today + timedelta(days=future_days)
-            _LOGGER.debug("Using user-configured date range for exams: %s to %s (%d past days, %d future days)", 
+            _LOGGER.debug("Using user-configured date range for exams: %s to %s (%d past days, %d future days)",
                          start_date.isoformat(), end_date.isoformat(), past_days, future_days)
         else:
             # Default fallback to current week if no config provided
             start_date = today - timedelta(days=today.weekday())
             end_date = start_date + timedelta(days=6)
-            _LOGGER.debug("Using default current week range for exams: %s to %s", 
+            _LOGGER.debug("Using default current week range for exams: %s to %s",
                          start_date.isoformat(), end_date.isoformat())
 
         # Prepare student object as required by API
@@ -473,12 +520,12 @@ class SchulmanagerHub:
 
 
     async def fetch_schedule_today_tomorrow(
-        self, student_id: str, class_id: int | None = None  # noqa: ARG002
-    ) -> dict[str, list]:
+        self, student_id: str, class_id: int | None = None
+    ) -> SchedulePayload:
         """Optimized schedule fetching using bundle version and browser API calls."""
         return await self._fetch_schedule_optimized(student_id)
 
-    async def _fetch_schedule_optimized(self, student_id: str) -> dict[str, list]:
+    async def _fetch_schedule_optimized(self, student_id: str) -> SchedulePayload:
         """Optimized schedule fetching using exact browser API call pattern."""
         sid = int(student_id)
         today = dt_util.now().date()
@@ -492,7 +539,11 @@ class SchulmanagerHub:
 
         if not student_info:
             _LOGGER.warning("Student info not found for ID %s", student_id)
-            return {"today": [], "tomorrow": []}
+            return {
+                "today": [],
+                "tomorrow": [],
+                "changes": {"today": [], "tomorrow": [], "summary": "Keine Stundenplanänderungen für heute und morgen"},
+            }
 
         # Get bundle version
         bundle_version = await self._discover_bundle_version()
@@ -563,7 +614,7 @@ class SchulmanagerHub:
 
     def _parse_batch_schedule_response(
         self, response_data: dict, reference_date
-    ) -> dict[str, Any]:
+    ) -> SchedulePayload:
         """Parse batch response from optimized get-actual-lessons call."""
         today_iso = reference_date.isoformat()
         tomorrow_iso = (reference_date + timedelta(days=1)).isoformat()
@@ -608,7 +659,7 @@ class SchulmanagerHub:
                                 changes_tomorrow.append(change)
 
         return {
-            "today": tlist, 
+            "today": tlist,
             "tomorrow": nlist,
             "changes": {
                 "today": changes_today,
@@ -618,7 +669,7 @@ class SchulmanagerHub:
         }
 
 
-    def _parse_schedule_data(self, data: Any, reference_date) -> dict[str, list]:
+    def _parse_schedule_data(self, data: Any, reference_date) -> SchedulePayload:
         """Parse verschiedene Datenformate für Stundenpläne."""
         today_iso = reference_date.isoformat()
         tomorrow_iso = (reference_date + timedelta(days=1)).isoformat()
@@ -638,7 +689,11 @@ class SchulmanagerHub:
                 or []
             )
         else:
-            return {"today": [], "tomorrow": []}
+            return {
+                "today": [],
+                "tomorrow": [],
+                "changes": {"today": [], "tomorrow": [], "summary": "Keine Stundenplanänderungen für heute und morgen"},
+            }
 
         for it in items:
             if not isinstance(it, dict):
@@ -662,7 +717,7 @@ class SchulmanagerHub:
                 nlist.append(it)
 
         return {
-            "today": tlist, 
+            "today": tlist,
             "tomorrow": nlist,
             "changes": {
                 "today": [],
@@ -675,22 +730,22 @@ class SchulmanagerHub:
         """Detect if a lesson represents a schedule change and structure it for LLM processing."""
         lesson_type = lesson.get("type", "")
         actual_lesson = lesson.get("actualLesson", {})
-        
+
         # Different lesson types that indicate changes (German translations)
         change_types = {
             "substitution": "Vertretung",
             "cancelledLesson": "Entfall",
-            "specialLesson": "Sonderstunde", 
+            "specialLesson": "Sonderstunde",
             "roomChange": "Raumänderung",
             "teacherChange": "Lehrervertretung",
             "irregularLesson": "Unregelmäßige Stunde",
             "exam": "Prüfung",
             "event": "Veranstaltung"
         }
-        
+
         # Basic change detection - this can be enhanced with more sophisticated logic
         change_info = None
-        
+
         if lesson_type != "regularLesson":
             # Non-regular lessons are potential changes
             change_info = {
@@ -699,14 +754,14 @@ class SchulmanagerHub:
                 "date": lesson.get("date", ""),
                 "original_subject": None,
                 "new_subject": "",
-                "original_teacher": None,  
+                "original_teacher": None,
                 "new_teacher": "",
                 "original_room": None,
                 "new_room": "",
                 "reason": lesson.get("substitutionText", ""),
                 "note": lesson.get("comment", "")
             }
-            
+
             # For cancelled lessons, get original lesson info
             if lesson_type == "cancelledLesson" and "originalLessons" in lesson:
                 original_lessons = lesson.get("originalLessons", [])
@@ -717,27 +772,27 @@ class SchulmanagerHub:
                     if original_teachers:
                         change_info["original_teacher"] = original_teachers[0].get("abbreviation", "")
                     change_info["original_room"] = original.get("room", {}).get("name", "")
-            
-            # For special/substitute lessons, get new lesson info  
+
+            # For special/substitute lessons, get new lesson info
             if actual_lesson:
                 change_info["new_subject"] = actual_lesson.get("subject", {}).get("abbreviation", "")
                 new_teachers = actual_lesson.get("teachers", [])
                 if new_teachers:
                     change_info["new_teacher"] = new_teachers[0].get("abbreviation", "")
                 change_info["new_room"] = actual_lesson.get("room", {}).get("name", "")
-        
+
         # Check for room changes within regular lessons (if room seems unusual)
         # This could be enhanced with baseline data comparison in the future
-            
+
         return change_info
 
     def _generate_changes_summary(self, today_changes: list, tomorrow_changes: list) -> str:
         """Generate a structured summary of changes for LLM processing in German."""
         if not today_changes and not tomorrow_changes:
             return "Keine Stundenplanänderungen für heute und morgen"
-        
+
         summary_parts = []
-        
+
         if today_changes:
             count_text = "Änderung" if len(today_changes) == 1 else "Änderungen"
             summary_parts.append(f"Heute ({len(today_changes)} {count_text}):")
@@ -750,9 +805,9 @@ class SchulmanagerHub:
                 new_teacher = change.get("new_teacher", "")
                 new_room = change.get("new_room", "")
                 reason = change.get("reason", "")
-                
+
                 change_desc = f"  {hour}. Stunde: {change_type}"
-                
+
                 # Format based on change type
                 if change_type == "Entfall" and original_subject:
                     change_desc += f" - {original_subject} entfällt"
@@ -772,12 +827,12 @@ class SchulmanagerHub:
                         change_desc += f" ({new_teacher})"
                     if new_room:
                         change_desc += f" in Raum {new_room}"
-                
+
                 if reason:
                     change_desc += f" - {reason}"
-                
+
                 summary_parts.append(change_desc)
-        
+
         if tomorrow_changes:
             count_text = "Änderung" if len(tomorrow_changes) == 1 else "Änderungen"
             summary_parts.append(f"Morgen ({len(tomorrow_changes)} {count_text}):")
@@ -790,9 +845,9 @@ class SchulmanagerHub:
                 new_teacher = change.get("new_teacher", "")
                 new_room = change.get("new_room", "")
                 reason = change.get("reason", "")
-                
+
                 change_desc = f"  {hour}. Stunde: {change_type}"
-                
+
                 # Format based on change type
                 if change_type == "Entfall" and original_subject:
                     change_desc += f" - {original_subject} entfällt"
@@ -812,30 +867,30 @@ class SchulmanagerHub:
                         change_desc += f" ({new_teacher})"
                     if new_room:
                         change_desc += f" in Raum {new_room}"
-                
+
                 if reason:
                     change_desc += f" - {reason}"
-                
+
                 summary_parts.append(change_desc)
-        
+
         return "\n".join(summary_parts)
-    
+
     async def _fetch_subjects(self) -> dict[int, dict[str, Any]]:
         """Fetch subject mappings from the API and cache them."""
         if self._subjects_cache:
             return self._subjects_cache
-            
+
         await ensure_authenticated(self)
-            
+
         request_data = {
             "bundleVersion": self._bundle_version or "7aa63feca5",
             "requests": [{
-                "moduleName": "grades", 
+                "moduleName": "grades",
                 "endpointName": "poqa",
                 "parameters": {
                     "action": {
                         "model": "main/subject",
-                        "action": "findAll", 
+                        "action": "findAll",
                         "parameters": [{
                             "attributes": ["id", "name", "abbreviation", "orderIndex", "officialKey"]
                         }]
@@ -844,12 +899,12 @@ class SchulmanagerHub:
                 }
             }]
         }
-        
+
         session = async_get_clientsession(self.hass)
         headers = common_headers()
         headers["Authorization"] = f"Bearer {self._token}"
         headers["Content-Type"] = "application/json"
-        
+
         try:
             async with session.post(
                 CALLS_URL,
@@ -859,23 +914,23 @@ class SchulmanagerHub:
                 if response.status != 200:
                     _LOGGER.error("Failed to fetch subjects: HTTP %d", response.status)
                     return {}
-                    
+
                 data = await response.json()
                 await self._dump("subjects_response", data)
-                
+
                 results = data.get("results", [])
                 if not results:
                     _LOGGER.warning("No results in subjects response")
                     return {}
-                    
+
                 result = results[0]
                 if result.get("status") != 200:
                     _LOGGER.error("API error fetching subjects: %s", result)
                     return {}
-                    
+
                 subjects_list = result.get("data", [])
                 subjects_cache = {}
-                
+
                 for subject in subjects_list:
                     subject_id = subject.get("id")
                     if subject_id:
@@ -885,103 +940,102 @@ class SchulmanagerHub:
                             "officialKey": subject.get("officialKey"),
                             "orderIndex": subject.get("orderIndex")
                         }
-                
+
                 self._subjects_cache = subjects_cache
                 _LOGGER.debug("Cached %d subjects", len(subjects_cache))
                 return subjects_cache
-                
+
         except Exception as err:
             _LOGGER.error("Exception fetching subjects: %s", err)
             return {}
-    
+
     async def _derive_subject_info(self, course_name: str, subject_id: int) -> tuple[str, str]:
         """Derive human-readable subject name and abbreviation using API data."""
         # First try to get from API cache
         subjects_cache = await self._fetch_subjects()
-        
+
         if subject_id in subjects_cache:
             subject_data = subjects_cache[subject_id]
             name = subject_data["name"]
             abbreviation = subject_data["abbreviation"]
-            
+
             # Use the API data
             return name, abbreviation
-        
+
         # Fallback to course name if API data unavailable
         if course_name:
             return course_name, course_name[:3].upper()
-        
+
         # Last resort: create a generic name
         return f"Fach {subject_id}", f"F{str(subject_id)[-2:]}"
-    
-    def _parse_german_grade(self, grade_value: str | int | float) -> float | None:
+
+    def _parse_german_grade(self, grade_value: str | float) -> float | None:
         """Parse German grade formats and return numeric value."""
         if not grade_value and grade_value != 0:
             return None
-            
+
         # Handle direct numeric values
         if isinstance(grade_value, (int, float)):
             return float(grade_value)
-        
+
         grade_str = str(grade_value).strip()
         if not grade_str:
             return None
-        
+
         # Handle format "0~3" -> 3.0
         if "~" in grade_str:
             try:
                 return float(grade_str.split("~")[1])
             except (ValueError, IndexError):
                 return None
-        
+
         # Handle formats like "4+", "4-", "2+"
         if grade_str.endswith(("+", "-")):
             try:
-                base_grade = float(grade_str[:-1])
                 # Treat both 4+ and 4- as 4.0 (ignore plus/minus for simplicity)
-                return base_grade
+                return float(grade_str[:-1])
             except ValueError:
                 return None
-        
+
         # Handle decimal grades like "2.5", "3.7"
         try:
             return float(grade_str)
         except ValueError:
             return None
-    
+
     def _calculate_subject_average(self, grade_categories: dict) -> float | None:
         """Calculate simple average of all grades in a subject."""
         if not grade_categories:
             return None
-        
+
         all_grades = []
-        
+
         # Collect all numeric grades from all categories
-        for category, grades_list in grade_categories.items():
+        for grades_list in grade_categories.values():
             if not grades_list:
                 continue
-                
+
             for grade in grades_list:
                 grade_value = grade.get("value", "")
-                
+
                 # Extract numeric value from German grade format
                 numeric_grade = self._parse_german_grade(grade_value)
-                
+
                 # Validate German grade range (1.0 - 6.0)
                 if numeric_grade is not None and 1.0 <= numeric_grade <= 6.0:
                     all_grades.append(numeric_grade)
-        
+
         if not all_grades:
             return None
-        
+
         # Calculate simple average and round to 2 decimal places
         average = sum(all_grades) / len(all_grades)
         return round(average, 2)
 
-    async def fetch_grades(self, student_id: str, class_id: int | None = None) -> dict[str, Any]:
+    async def fetch_grades(self, student_id: str, class_id: int | None = None) -> GradesPayload:
         """Fetch grades for a student using the proper grades API."""
         sid = int(student_id)
-        
+
         # Get bundle version
         bundle_version = await self._discover_bundle_version()
         if not bundle_version:
@@ -1027,12 +1081,17 @@ class SchulmanagerHub:
         }
 
         _LOGGER.debug("Fetching grades for student %s (term %s)", student_id, term_id)
-        
+
         async with sess.post(CALLS_URL, json=grades_payload, headers=headers) as response:
             if response.status != 200:
                 _LOGGER.error("Grades fetch failed with status %d", response.status)
-                return {"subjects": {}}
-            
+                return {
+                    "subjects": {},
+                    "overall_average": None,
+                    "total_subjects": 0,
+                    "subjects_with_grades": 0,
+                }
+
             response_data = await response.json()
             await self._dump(f"grades_response_{student_id}.json", response_data)
 
@@ -1044,104 +1103,121 @@ class SchulmanagerHub:
                     return await self._process_grades_data(grades_data)
 
             _LOGGER.debug("No grades found for student %s", student_id)
-            return {"subjects": {}}
+            return {
+                "subjects": {},
+                "overall_average": None,
+                "total_subjects": 0,
+                "subjects_with_grades": 0,
+            }
 
-    async def _process_grades_data(self, grades_data: dict) -> dict[str, Any]:
+    async def _process_grades_data(self, grades_data: dict) -> GradesPayload:
         """Process raw grades data into structured format by subject."""
         courses = grades_data.get("courses", [])
         grading_events = grades_data.get("gradingEvents", [])
         type_presets = grades_data.get("typePresets", [])
-        
+
         # Create mapping from course ID to course info
         course_map = {course["id"]: course for course in courses}
-        
+
         # Create mapping from gradeTypeId to type info
         type_map = {}
         for preset in type_presets:
             if "gradeType" in preset:
                 grade_type = preset["gradeType"]
                 type_map[grade_type["id"]] = grade_type
-        
+
         # Group grades by subject using subjectId as the key
         subjects = {}
         subject_info = {}  # Map subjectId to (subject_name, abbreviation)
-        
+
         # Create human-readable subject names and abbreviations from course data
         for course in courses:
             subject_id = course.get("subjectId")
             if not subject_id:
                 continue
-                
+
             # Try to derive subject name and abbreviation from course name patterns
             course_name = course.get("name", "")
             subject_name, subject_abbrev = await self._derive_subject_info(course_name, subject_id)
-            
+
             if subject_id not in subject_info or (course_name and len(course_name) > 3):
                 subject_info[subject_id] = (subject_name, subject_abbrev)
-        
+
         # Process grading events (actual grades)
         for event in grading_events:
             course_id = event.get("courseId")
             if course_id not in course_map:
                 continue
-                
+
             course = course_map[course_id]
             subject_id = course.get("subjectId")
             if not subject_id:
                 continue
-            
+
             # Initialize subject if not exists
             if subject_id not in subjects:
                 # Get readable subject name and abbreviation
                 subject_name, subject_abbrev = subject_info.get(subject_id, (f"Fach {subject_id}", f"F{subject_id}"))
-                
+
                 subjects[subject_id] = {
                     "name": subject_name,
                     "abbreviation": subject_abbrev,
                     "average": None,  # No average provided in API, would need calculation
                     "grades": {}
                 }
-            
+
             # Process grades in this event
             for grade_data in event.get("grades", []):
                 grade_value = grade_data.get("value")
                 if not grade_value:
                     continue
-                
+
                 # Get grade type info
                 grade_type_id = event.get("gradeTypeId")
                 grade_type_info = type_map.get(grade_type_id, {})
                 grade_type_name = grade_type_info.get("name", "Sonstige")
-                
+
                 # Create grade entry
+                # Normalize grade value: map formats like "0~2" -> 2.0, "4+" -> 4.0
+                parsed_value = self._parse_german_grade(grade_value)
+                tendency = None
+                if isinstance(grade_value, str):
+                    if grade_value.endswith("+"):
+                        tendency = "plus"
+                    elif grade_value.endswith("-"):
+                        tendency = "minus"
+
                 grade_entry = {
-                    "value": grade_value,
+                    # Store normalized numeric where possible
+                    "value": parsed_value if parsed_value is not None else grade_value,
+                    "original_value": grade_value,
+                    "tendency": tendency,
                     "date": event.get("date"),
                     "topic": event.get("topic", ""),
                     "weighting": event.get("weighting", 1),
                     "duration": event.get("durationInMinutes"),
                     "type_abbreviation": grade_type_info.get("abbreviation", ""),
-                    "is_repeat_exam": grade_data.get("isRepeatExam", False)
+                    "is_repeat_exam": grade_data.get("isRepeatExam", False),
                 }
-                
+
                 # Add to appropriate category (only create categories that have grades)
                 if grade_type_name not in subjects[subject_id]["grades"]:
                     subjects[subject_id]["grades"][grade_type_name] = []
                 subjects[subject_id]["grades"][grade_type_name].append(grade_entry)
-        
+
         # Calculate averages for each subject
         all_subject_averages = []
-        for subject_id, subject_data in subjects.items():
+        for subject_data in subjects.values():
             avg = self._calculate_subject_average(subject_data["grades"])
             subject_data["average"] = avg
             if avg is not None:
                 all_subject_averages.append(avg)
-        
+
         # Calculate overall student average from all subject averages
         overall_average = None
         if all_subject_averages:
             overall_average = round(sum(all_subject_averages) / len(all_subject_averages), 2)
-        
+
         return {
             "subjects": subjects,
             "overall_average": overall_average,
@@ -1161,7 +1237,7 @@ class SchulmanagerHub:
         if enabled_features is None:
             enabled_features = {
                 "homework": True,
-                "schedule": True, 
+                "schedule": True,
                 "exams": True,
                 "grades": True,
             }

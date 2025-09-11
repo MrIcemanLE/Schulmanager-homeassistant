@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from logging import getLogger
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
@@ -10,24 +11,35 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, VERSION
+from .const import DOMAIN
+from .coordinator import SchulmanagerCoordinator
 from .util import normalize_student_slug
+
+_LOGGER = getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Schulmanager calendar entities."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coord = data["coordinator"]
-    hub = data["hub"]
+    runtime = entry.runtime_data or {}
+    coord: SchulmanagerCoordinator | None = runtime.get("coordinator")
+    client = runtime.get("client")
+    if coord is None or client is None:
+        missing = [n for n, v in {"coordinator": coord, "client": client}.items() if v is None]
+        _LOGGER.warning(
+            "Runtime data incomplete for entry %s: missing %s; skipping calendar setup",
+            entry.entry_id,
+            ", ".join(missing),
+        )
+        return
     entities: list[CalendarEntity] = []
 
-    for st in hub._students:  # noqa: SLF001
+    for st in client._students:  # noqa: SLF001
         sid = st["id"]
         name = st["name"]
         slug = normalize_student_slug(name)
-        entities.append(ExamsCalendar(hub, coord, sid, name, slug))
+        entities.append(ExamsCalendar(client, coord, sid, name, slug))
 
     async_add_entities(entities)
 
@@ -38,16 +50,19 @@ class ExamsCalendar(CalendarEntity):
     _attr_has_entity_name = True
 
     def __init__(
-        self, hub, coordinator, student_id: str, student_name: str, slug: str
+        self, client, coordinator, student_id: str, student_name: str, slug: str
     ) -> None:
         """Initialize the calendar entity."""
-        self.hub = hub
+        self.hub = client
         self.coordinator = coordinator
         self.student_id = student_id
         self.student_name = student_name
-        self._attr_unique_id = f"schulmanager_{slug}_arbeiten"
+        # Stable unique ID based on immutable student ID
+        self._attr_unique_id = f"schulmanager_{self.student_id}_exams"
         self._attr_name = "Arbeiten"
         self._attr_icon = "mdi:book-education"
+
+
 
     @property
     def event(self) -> CalendarEvent | None:
@@ -246,9 +261,9 @@ class ExamsCalendar(CalendarEntity):
             name=self.student_name,
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
+
         )
 
     @property

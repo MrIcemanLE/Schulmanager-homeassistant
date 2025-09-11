@@ -1,3 +1,5 @@
+"""Todo platform for Schulmanager homework lists."""
+
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +14,8 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, VERSION
+from .const import DOMAIN
+from .coordinator import SchulmanagerCoordinator
 from .util import normalize_student_slug
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,41 +37,52 @@ async def async_setup_entry(
     """Set up Schulmanager todo list entities."""
     _LOGGER.debug("Setting up Schulmanager todo entities")
 
-    data = hass.data[DOMAIN][entry.entry_id]
-    coord = data["coordinator"]
-    hub = data["hub"]
+    runtime = entry.runtime_data or {}
+    coord = runtime.get("coordinator")
+    client = runtime.get("client")
+    if coord is None or client is None:
+        missing = [n for n, v in {"coordinator": coord, "client": client}.items() if v is None]
+        _LOGGER.warning(
+            "Runtime data incomplete for entry %s: missing %s; skipping todo setup",
+            entry.entry_id,
+            ", ".join(missing),
+        )
+        return
     entities: list[TodoListEntity] = []
 
     # Debug: Prüfe ob Schüler vorhanden
-    _LOGGER.debug("Students available: %s", hub._students)
+    _LOGGER.debug("Students available: %s", client.get_students())
 
-    for st in hub._students:
+    for st in client.get_students():
         sid = st["id"]
         name = st["name"]
         slug = normalize_student_slug(name)
 
         _LOGGER.debug("Creating todo entity for student %s (ID: %s)", name, sid)
-        entities.append(HomeworkTodoList(hub, coord, sid, name, slug))
+        entities.append(HomeworkTodoList(client, coord, sid, name, slug))
 
     _LOGGER.debug("Adding %d todo entities", len(entities))
     async_add_entities(entities, update_before_add=True)
 
 
-class HomeworkTodoList(CoordinatorEntity, TodoListEntity):
+class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntity):
     """Todo list entity for student homework."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_supported_features = TodoListEntityFeature.UPDATE_TODO_ITEM
 
     def __init__(
-        self, hub: Any, coordinator: Any, student_id: str, student_name: str, slug: str
+        self, client: Any, coordinator: SchulmanagerCoordinator, student_id: str, student_name: str, slug: str
     ) -> None:
+        """Initialize a homework todo list entity for a student."""
         super().__init__(coordinator)
-        self.hub = hub
+        self.client = client
         self.student_id = student_id
         self.student_name = student_name
-        self._attr_unique_id = f"schulmanager_{slug}_hausaufgaben"
-        self._attr_name = f"Hausaufgaben {student_name}"
+        # Stable unique ID based on immutable student ID
+        self._attr_unique_id = f"schulmanager_{self.student_id}_homework"
+        # Entity name combines with device name when has_entity_name=True
+        self._attr_name = "Hausaufgaben"
         self._attr_icon = "mdi:clipboard-check-multiple-outline"
         self._attr_todo_items: list[TodoItem] | None = None
 
@@ -98,7 +112,6 @@ class HomeworkTodoList(CoordinatorEntity, TodoListEntity):
             name=self.student_name,
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
         )

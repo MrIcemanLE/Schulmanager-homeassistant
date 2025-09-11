@@ -8,25 +8,39 @@
           "username": "E-mail",
           "password": "Password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Schulmanager",
+        "description": "Please re-enter your credentials to restore access.",
+        "data": {
+          "username": "E-mail",
+          "password": "Password"
+        }
       }
     },
     "error": {
       "invalid_auth": "Invalid authentication",
+      "cannot_connect": "Unable to connect",
+      "no_students": "No students found in your account",
       "unknown": "Unknown error"
     },
-    "abort": {}
+    "abort": {
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Reauthentication was successful"
+    }
   },
   "options": {
     "step": {
       "init": {
         "title": "Schulmanager Options",
         "data": {
-          "poll_interval": "Polling interval (seconds)",
           "enable_homework": "Fetch homework",
           "enable_schedule": "Fetch schedule",
           "enable_exams": "Fetch exams",
+          "enable_grades": "Fetch grades",
           "range_past_days": "Days in the past",
           "range_future_days": "Days in the future",
+          "refresh_cooldown": "Manual refresh cooldown (minutes, 5-30)",
           "debug_dumps": "Write debug dumps"
         }
       }

@@ -1,32 +1,65 @@
+"""Integration setup for Schulmanager Online."""
+
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+import shutil
 
-from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.device_registry import async_get as async_get_device_registry
+from homeassistant.helpers.device_registry import (
+    DeviceEntryType,
+    async_get as async_get_device_registry,
+)
 
+from .api_client import SchulmanagerClient
 from .const import (
+    CONF_PASSWORD,
+    CONF_USERNAME,
     DOMAIN,
-    VERSION,
-    OPT_POLL_INTERVAL,
-    DEFAULT_SCAN_INTERVAL,
     OPT_DEBUG_DUMPS,
+    OPT_ENABLE_EXAMS,
     OPT_ENABLE_HOMEWORK,
     OPT_ENABLE_SCHEDULE,
-    OPT_ENABLE_EXAMS,
-    OPT_ENABLE_GRADES,
-    CONF_USERNAME,
-    CONF_PASSWORD,
+    VERSION,
 )
-from .api_client import SchulmanagerHub
 from .coordinator import SchulmanagerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.TODO, Platform.CALENDAR, Platform.BUTTON]
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate old config entry versions.
+
+    - v1 -> v2: remove deprecated polling options (auto_update_interval, poll_interval)
+    """
+    version = entry.version
+
+    if version < 2:
+        options = dict(entry.options)
+        removed: list[str] = []
+        for key in ("auto_update_interval", "poll_interval"):
+            if key in options:
+                options.pop(key)
+                removed.append(key)
+
+        if removed:
+            _LOGGER.debug(
+                "Migrating config entry %s: removing deprecated options %s",
+                entry.entry_id,
+                removed,
+            )
+            hass.config_entries.async_update_entry(entry, options=options)
+
+        entry.version = 2
+        return True
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -38,15 +71,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     enable_homework = bool(options.get(OPT_ENABLE_HOMEWORK, True))
     enable_schedule = bool(options.get(OPT_ENABLE_SCHEDULE, True))
     enable_exams = bool(options.get(OPT_ENABLE_EXAMS, True))
-    enable_grades = bool(options.get(OPT_ENABLE_GRADES, True))
 
-    hub = SchulmanagerHub(
+    client = SchulmanagerClient(
         hass,
         entry.data[CONF_USERNAME],
         entry.data[CONF_PASSWORD],
         debug_dumps=debug_dumps,
     )
-    coordinator = SchulmanagerCoordinator(hass, hub, entry)
+    coordinator = SchulmanagerCoordinator(hass, client, entry)
 
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -54,33 +86,58 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.exception("Failed to initialize Schulmanager")
         raise ConfigEntryNotReady from e
 
-    # Create or update device entries for students early in the setup process
+    # Create the main Schulmanager service device
     device_registry = async_get_device_registry(hass)
-    for student in hub._students:
-        device_entry = device_registry.async_get_or_create(
+
+    # Main service device
+    service_device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"service_{entry.entry_id}")},
+        name="Schulmanager Online",
+        manufacturer="Schulmanager Online",
+        model="Portal-Zugang",
+        sw_version=VERSION,
+        entry_type=DeviceEntryType.SERVICE,
+        suggested_area="Schule",
+        configuration_url="https://login.schulmanager-online.de/",
+    )
+    _LOGGER.info("Service device created with ID: %s, identifiers: %s", service_device.id, service_device.identifiers)
+
+    # Student devices linked to the service
+    for student in client.get_students():
+        student_device = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, f"student_{student['id']}")},
             name=student["name"],
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
+            # Link student to service device
+            via_device=(DOMAIN, f"service_{entry.entry_id}"),
         )
 
+        # Ensure the device is properly linked to the service device and config entry
+        device_registry.async_update_device(
+            student_device.id,
+            via_device_id=service_device.id,
+        )
+        _LOGGER.info("Student device %s updated with via_device_id: %s", student_device.name, service_device.id)
+
         # If device was orphaned, make sure it's properly linked to this config entry
-        if entry.entry_id not in device_entry.config_entries:
+        if entry.entry_id not in student_device.config_entries:
             device_registry.async_update_device(
-                device_entry.id,
+                student_device.id,
                 add_config_entry_id=entry.entry_id
             )
 
-    _LOGGER.info("Created device entries for %d students", len(hub._students))
+    _LOGGER.info("Created service device and %d student devices", len(client.get_students()))
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "hub": hub,
-        "coordinator": coordinator,
-    }
+    # Store runtime data on the entry per guidelines
+    entry.runtime_data = {"client": client, "coordinator": coordinator}
+
+    # Keep minimal mapping for domain-level services bookkeeping
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"entry": entry}
 
     # Set up platforms based on enabled features
     platforms_to_load = []
@@ -140,6 +197,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        entry.runtime_data = None
 
     # Unregister services if this was the last entry
     if not hass.data[DOMAIN]:
@@ -156,31 +214,29 @@ async def _async_register_services(hass: HomeAssistant) -> None:
     async def clear_cache_service(_call: ServiceCall) -> None:
         """Clear cache for all Schulmanager instances."""
         for entry_data in hass.data[DOMAIN].values():
-            hub = entry_data["hub"]
-            hub._token = None
-            hub._bundle_version = None
-            _LOGGER.info("Cleared cache for Schulmanager")
+            entry: ConfigEntry = entry_data["entry"]
+            client = entry.runtime_data["client"]
+            client.clear_auth_cache()
+            _LOGGER.info("Cleared service client cache")
 
     async def refresh_service(_call: ServiceCall) -> None:
         """Refresh data for all Schulmanager instances with cooldown enforcement."""
         for entry_data in hass.data[DOMAIN].values():
-            coordinator = entry_data["coordinator"]
+            entry: ConfigEntry = entry_data["entry"]
+            coordinator = entry.runtime_data["coordinator"]
             await coordinator.async_request_manual_refresh()
 
     async def clear_debug_service(_call: ServiceCall) -> None:
         """Clear debug files."""
-        import os
-        import shutil
 
         for entry_data in hass.data[DOMAIN].values():
-            hub = entry_data["hub"]
-            if hub.debug_dumps:
-                debug_path = hass.config.path(
-                    "custom_components", "schulmanager", "debug"
-                )
-                if os.path.exists(debug_path):
+            entry: ConfigEntry = entry_data["entry"]
+            client = entry.runtime_data["client"]
+            if client.debug_dumps:
+                debug_path = hass.config.path("custom_components", "schulmanager", "debug")
+                if Path(debug_path).exists():
                     shutil.rmtree(debug_path)
-                    _LOGGER.info("Cleared debug files")
+                    _LOGGER.info("Cleared service debug files")
 
     # Register services only once
     if not hass.services.has_service(DOMAIN, "clear_cache"):
