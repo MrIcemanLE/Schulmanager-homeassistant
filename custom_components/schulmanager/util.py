@@ -1,4 +1,4 @@
-
+"""Utility helpers for Schulmanager integration."""
 from __future__ import annotations
 
 import re
@@ -15,7 +15,8 @@ GERMAN_MAP = {
 }
 
 def normalize_student_slug(name: str) -> str:
-    for k,v in GERMAN_MAP.items():
+    """Normalize a student name to a slug identifier."""
+    for k, v in GERMAN_MAP.items():
         name = name.replace(k, v)
     name = unicodedata.normalize("NFKD", name)
     name = "".join(ch for ch in name if not unicodedata.combining(ch))

@@ -8,28 +8,39 @@
           "username": "E-Mail",
           "password": "Passwort"
         }
+      },
+      "reauth_confirm": {
+        "title": "Schulmanager neu authentifizieren",
+        "description": "Bitte gib deine Zugangsdaten erneut ein, um den Zugriff wiederherzustellen.",
+        "data": {
+          "username": "E-Mail",
+          "password": "Passwort"
+        }
       }
     },
     "error": {
       "invalid_auth": "Anmeldung fehlgeschlagen",
+      "cannot_connect": "Verbindung fehlgeschlagen",
+      "no_students": "Keine Schüler in deinem Konto gefunden",
       "unknown": "Unbekannter Fehler"
     },
-    "abort": {}
+    "abort": {
+      "already_configured": "Gerät ist bereits konfiguriert",
+      "reauth_successful": "Neu-Authentifizierung war erfolgreich"
+    }
   },
   "options": {
     "step": {
       "init": {
         "title": "Schulmanager Optionen",
         "data": {
-          "auto_update_interval": "Automatisches Update-Intervall (Stunden, 1-6)",
-          "poll_interval": "Legacy Abrufintervall (Sekunden)",
           "enable_homework": "Hausaufgaben abrufen",
           "enable_schedule": "Stundenplan abrufen",
           "enable_exams": "Arbeiten abrufen",
           "enable_grades": "Noten abrufen",
           "range_past_days": "Tage in der Vergangenheit",
           "range_future_days": "Tage in der Zukunft",
-          "refresh_cooldown": "Manuelle Aktualisierung Abkühlzeit (Minuten, 5-30)",
+          "refresh_cooldown": "Abkühlzeit für manuelle Aktualisierung (Minuten, 5-30)",
           "debug_dumps": "Debug-Dumps schreiben"
         }
       }

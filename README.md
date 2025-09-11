@@ -1,3 +1,13 @@
+
+## Highlights (v0.4.0)
+
+- New events: `schulmanager_homework_new`, `schulmanager_grade_new`
+- Schedule changes merged into hour blocks
+- Grades normalized and summarized (text + markdown)
+- Diagnostics; reduced debug dumps
+- EN/DE translations, improved typing
+
+
 # Schulmanager Online Integration für Home Assistant
 
 Eine Home Assistant Integration für Schulmanager Online, um Schulinformationen wie Stundenplan, Hausaufgaben, Arbeiten und Noten abzurufen.
