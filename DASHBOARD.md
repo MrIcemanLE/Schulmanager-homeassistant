@@ -42,7 +42,7 @@ Nach der Installation der Integration stehen folgende Entitäten zur Verfügung:
 
 **📋 YAML Konfiguration:**
 
-\`\`\`yaml
+```yaml
 # =================================================
 # SCHULMANAGER STUNDENPLAN - STANDARD KARTEN
 # =================================================
@@ -136,7 +136,7 @@ Nach der Installation der Integration stehen folgende Entitäten zur Verfügung:
 
 # WICHTIG: Ersetzen Sie "SCHUELERNAME" durch den echten Schülernamen
 # Beispiel: Bei "Max Mustermann" verwenden Sie "max_mustermann"
-\`\`\`
+```
 
 ---
 
@@ -153,7 +153,7 @@ Nach der Installation der Integration stehen folgende Entitäten zur Verfügung:
 
 **📋 YAML Konfiguration:**
 
-\`\`\`yaml
+```yaml
 # =======================================================
 # SCHULMANAGER STUNDENPLAN - FLEX TABLE CARD
 # =======================================================
@@ -270,7 +270,7 @@ Nach der Installation der Integration stehen folgende Entitäten zur Verfügung:
               border: 2px solid orange;
               background-color: rgba(255, 165, 0, 0.1);
             }
-\`\`\`
+```
 
 ---
 
@@ -284,7 +284,7 @@ Nach der Installation der Integration stehen folgende Entitäten zur Verfügung:
 
 **📋 YAML Konfiguration:**
 
-\`\`\`yaml
+```yaml
 # =======================================================
 # KOMPLETTES SCHULMANAGER DASHBOARD
 # =======================================================
@@ -451,7 +451,7 @@ view:
     - type: todo-list
       entity: todo.SCHUELERNAME_hausaufgaben
       title: "📚 Hausaufgaben"
-\`\`\`
+```
 
 ---
 
@@ -471,7 +471,7 @@ view:
 ### 3. Mehrere Schüler
 Für mehrere Schüler duplizieren Sie die Abschnitte und ändern die Namen entsprechend:
 
-\`\`\`yaml
+```yaml
 # Schüler 1
 - type: markdown
   title: "📅 Max - Stundenplan Heute"
@@ -483,7 +483,7 @@ Für mehrere Schüler duplizieren Sie die Abschnitte und ändern die Namen entsp
   title: "📅 Anna - Stundenplan Heute"
   content: |
     {{ state_attr('sensor.anna_mustermann_stundenplan_heute', 'html') }}
-\`\`\`
+```
 
 ---
 
@@ -491,7 +491,7 @@ Für mehrere Schüler duplizieren Sie die Abschnitte und ändern die Namen entsp
 
 ### Farben ändern
 Passen Sie die Farben an Ihr Theme an:
-\`\`\`yaml
+```yaml
 # Primärfarbe für Heute
 background-color: var(--primary-color);
 # Akzentfarbe für Morgen  
@@ -499,27 +499,27 @@ background-color: var(--accent-color);
 # Eigene Farben
 background-color: #1976d2;  # Blau
 background-color: #388e3c;  # Grün
-\`\`\`
+```
 
 ### Icons ändern
 Verwenden Sie verschiedene Material Design Icons:
-\`\`\`yaml
+```yaml
 icon: mdi:school-outline        # Schule
 icon: mdi:calendar-today        # Kalender
 icon: mdi:clock-outline         # Uhr
 icon: mdi:book-education        # Buch
 icon: mdi:calendar-alert        # Warnung
-\`\`\`
+```
 
 ### Mobile Optimierung
 Die Tabellen sind bereits responsive. Für bessere mobile Darstellung können Sie die Spaltenbreiten anpassen:
-\`\`\`css
+```css
 th:nth-child(1) { width: 15%; } /* Stunde */
 th:nth-child(2) { width: 25%; } /* Fach */
 th:nth-child(3) { width: 20%; } /* Raum */
 th:nth-child(4) { width: 25%; } /* Lehrer */
 th:nth-child(5) { width: 15%; } /* Status */
-\`\`\`
+```
 
 ---
 
@@ -562,7 +562,7 @@ th:nth-child(5) { width: 15%; } /* Status */
 
 ---
 
-## 📞 Support
+## Support
 
 Bei Problemen oder Fragen:
 1. Überprüfen Sie die [Issues](https://github.com/MrIcemanLE/Schulmanager-homeassistant/issues) auf GitHub
