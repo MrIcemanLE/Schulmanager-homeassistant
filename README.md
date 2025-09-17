@@ -1,103 +1,93 @@
-# Schulmanager Online Integration für Home Assistant
+# 🏫 Schulmanager Online – Home Assistant Integration
 
-Eine Home Assistant Integration für Schulmanager Online, um Schulinformationen wie Stundenplan, Hausaufgaben, Arbeiten und Noten abzurufen.
+Bringt Stundenplan, Arbeiten (Klausuren/Tests), Hausaufgaben und Noten aus Schulmanager Online direkt in Home Assistant. Mit Ereignissen bei neuen Daten, Kalendern pro Schüler und smarten Optionen.
 
-> **⚠️ BETA-VERSION**  
-> Diese Integration befindet sich noch in einem frühen Beta-Stadium. Es können Fehler auftreten und Funktionen können sich noch ändern. Verwenden Sie die Integration auf eigene Verantwortung und melden Sie Probleme über GitHub Issues.
+## ✨ Funktionen
 
-## Installation über HACS
+- 📅 Stundenplan-Kalender je Schüler
+  - Titel: „Fach – Raum“ (z. B. „Mathe – R102“)
+  - Hervorhebung per Emoji (optional): ❌ Ausfall, 🔁 Vertretung/Sonderstunde/Lehrerwechsel, 🚪 Raumwechsel, 📝 Prüfung
+  - Doppelte Einträge vermieden: Bei Ersatzstunde wird Ausfall in der Beschreibung erwähnt
+- 🗓️ Arbeiten-Kalender je Schüler mit Terminen und Details
+- 📝 Hausaufgaben als To‑Do‑Liste je Schüler (Status bleibt erhalten)
+- 🧮 Noten je Fach + Gesamtdurchschnitt, inkl. Zusammenfassungen (Text/Markdown)
+- 🔔 Ereignisse bei neuen Hausaufgaben/Noten (nach der Ersteinrichtung)
+- 🧰 Diagnosen mit sicherer Schwärzung sensibler Daten
 
-1. Öffne HACS in Home Assistant
-2. Gehe zu "Integrationen"
-3. Klicke auf die drei Punkte oben rechts und wähle "Benutzerdefinierte Repositories"
-4. Füge diese Repository-URL hinzu: `https://github.com/MrIcemanLE/Schulmanager-homeassistant`
-5. Wähle die Kategorie "Integration"
-6. Klicke auf "Hinzufügen"
-7. Suche nach "Schulmanager" und installiere die Integration
-8. Starte Home Assistant neu
+## 🔧 Einrichtung
 
-## Manuelle Installation
+1. Integration hinzufügen: „Schulmanager Online“ auswählen und Zugangsdaten eingeben
+2. Schüler werden automatisch erkannt; Geräte und Entitäten werden angelegt
+3. Optionen anpassen (Einstellungen → Integrationen → Schulmanager → Optionen):
+   - „Stundenplan abrufen“ / „Arbeiten abrufen“ / „Hausaufgaben abrufen“ / „Noten abrufen“
+   - „Stundenplan Wochen im Voraus (1–3)“
+   - „Emoji-Hervorhebung für Änderungen/Ausfälle verwenden“
+   - „Ausfälle ausblenden, wenn Hervorhebung aus ist“
+   - Abkühlzeit für manuelle Aktualisierung (Buttons/Service)
 
-1. Kopiere den `schulmanager` Ordner in dein `custom_components` Verzeichnis
-2. Starte Home Assistant neu
-3. Füge die Integration über die UI hinzu
+Hinweis: Die Integration ruft Perioden-Updates asynchron ab und respektiert eine konfigurierbare manuelle Abkühlzeit.
 
-## Konfiguration
+## 🧭 Entitäten & Geräte
 
-Nach der Installation kannst du die Integration über die Home Assistant UI konfigurieren:
+- Geräte pro Schüler sowie ein Dienst‑Gerät für die Integration
+- Kalender:
+  - „SCHÜLERNAME Stundenplan“
+  - „SCHÜLERNAME Arbeiten“
+- Sensoren je Schüler:
+  - Stundenplan heute / morgen (Planmäßig/Abweichung)
+  - Stundenplan Änderungen (Anzahl + strukturierte Details)
+  - Tage bis nächste Arbeit
+  - Noten je Fach + Gesamt
+- To‑Do:
+  - „Hausaufgaben“ je Schüler
 
-1. Gehe zu Einstellungen > Geräte & Dienste
-2. Klicke auf "Integration hinzufügen"
-3. Suche nach "Schulmanager"
-4. Gib deine Schulmanager-Zugangsdaten ein
+## 🧩 Lovelace – Beispiel (Sections)
 
-## Features
-
-- 📅 **Stundenplan**: Aktuelle und kommende Stunden mit Änderungserkennung
-- 📝 **Hausaufgaben**: Anstehende Aufgaben mit Details und Todo-Integration
-- 📊 **Arbeiten/Klausuren**: Geplante Arbeiten mit Countdown-Funktion
-- 🎯 **Noten**: Aktuelle Noten nach Fächern mit Gesamtdurchschnitt
-- ⏰ **Arbeitsalarm**: Sensor zeigt Tage bis zur nächsten Arbeit
-- 🔄 **Automatische Updates**: Konfigurierbare Update-Intervalle
-- 🌍 **Deutsche Lokalisierung**: Vollständig auf Deutsch verfügbar
-
-## 📊 Dashboard Integration
-
-Die Integration stellt verschiedene Sensoren und Kalender bereit, die auf dem Home Assistant Dashboard angezeigt werden können. 
-
-**📋 Verfügbare Entitäten:**
-- `sensor.SCHUELERNAME_stundenplan_heute` - Heutiger Stundenplan
-- `sensor.SCHUELERNAME_stundenplan_morgen` - Stundenplan für morgen  
-- `sensor.SCHUELERNAME_tage_bis_naechste_arbeit` - ⭐ **NEU**: Countdown bis zur nächsten Arbeit
-- `calendar.SCHUELERNAME_arbeiten` - Kalender mit Arbeiten
-- `todo.SCHUELERNAME_hausaufgaben` - Hausaufgaben als Todo-Liste
-
-**🎨 Dashboard-Konfigurationen:**
-
-Wir stellen drei vorgefertigte Dashboard-Konfigurationen bereit:
-
-| Option | Schwierigkeit | Features |
-|--------|--------------|----------|
-| **Standard Markdown** | ⭐ Einfach | Sofort einsatzbereit, keine zusätzliche Installation |
-| **Flex Table Card** | ⭐⭐ Mittel | Erweiterte Tabellenfunktionen, HACS erforderlich |
-| **Komplettes Dashboard** | ⭐⭐⭐ Fortgeschritten | Vollständige Schul-Übersicht mit allen Features |
-
-➡️ **[Zur detaillierten Dashboard-Anleitung (DASHBOARD.md)](DASHBOARD.md)**
-
-## Konfigurationsoptionen
-
-- **Automatisches Update-Intervall**: 1-6 Stunden
-- **Funktionen aktivieren/deaktivieren**: Stundenplan, Hausaufgaben, Arbeiten, Noten
-- **Zeitbereich**: Tage in Vergangenheit/Zukunft
-- **Manuelle Aktualisierung**: Abkühlzeit 5-30 Minuten
-
-## Entwicklung & Versioning
-
-Diese Integration folgt [Semantic Versioning](https://semver.org/). Alle Änderungen werden in der [CHANGELOG.md](CHANGELOG.md) dokumentiert.
-
-### Release-Prozess
-
-Für Entwickler, die zur Integration beitragen möchten:
-
-```bash
-# Patch-Release (Bugfixes)
-./scripts/release.sh patch "Fixed calendar sync issue"
-
-# Minor-Release (Neue Features)
-./scripts/release.sh minor "Added support for exam grades"
-
-# Major-Release (Breaking changes)
-./scripts/release.sh major "Restructured sensor entities"
+```yaml
+type: sections
+sections:
+  - type: grid
+    cards:
+      - type: calendar
+        title: "📅 {{ state_attr('device_tracker.me', 'friendly_name') }} Stundenplan"
+        entities:
+          - calendar.<dein_schueler_slug>_stundenplan
+      - type: calendar
+        title: "🗓️ Arbeiten"
+        entities:
+          - calendar.<dein_schueler_slug>_arbeiten
+  - type: grid
+    cards:
+      - type: entities
+        title: "🔔 Änderungen"
+        entities:
+          - sensor.schulmanager_<schueler_id>_schedule_changes
+      - type: entities
+        title: "📝 Hausaufgaben"
+        entities:
+          - todo.schulmanager_<schueler_id>_homework
+  - type: grid
+    cards:
+      - type: entities
+        title: "🧮 Noten Überblick"
+        entities:
+          - sensor.schulmanager_<schueler_id>_grades_overall
 ```
 
-### Version-History
+Ersetze `<dein_schueler_slug>`/`<schueler_id>` entsprechend deinen Entitäten. Die Kalender‑Entitäten werden mit dem Schülernamen angelegt (z. B. „Max Mustermann Stundenplan“).
 
-Siehe [CHANGELOG.md](CHANGELOG.md) für eine detaillierte Liste aller Änderungen.
+## 🚀 Manuelle Aktualisierung
 
-## Unterstützung
+- Button „Schulmanager jetzt aktualisieren“ oder Service `schulmanager.refresh`
+- Abkühlzeit verhindert zu häufige Abrufe
 
-Bei Problemen oder Fragen erstelle bitte ein Issue auf GitHub.
+## 🔔 Ereignisse
 
-## Lizenz
+- `schulmanager_homework_new` bei neuen Hausaufgaben
+- `schulmanager_grade_new` bei neuen Noten
 
-Dieses Projekt steht unter der MIT Lizenz.
+## ℹ️ Hinweise
+
+- Zeiten im Stundenplan werden aus der API übernommen; wenn nicht vorhanden, wird per Stundennummer ein gängiges Raster (45 Min + Pausen) verwendet.
+- Die Integration prüft auf doppelte Einträge: Ausfall + Ersatzstunde derselben Stunde erscheinen als ein Termin, der Ausfall steht in der Beschreibung.
+

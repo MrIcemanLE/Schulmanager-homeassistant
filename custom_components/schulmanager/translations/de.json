@@ -1,4 +1,41 @@
 {
+  "entity": {
+    "button": {
+      "refresh": {
+        "name": "Jetzt aktualisieren"
+      }
+    },
+    "sensor": {
+      "schedule_today": {
+        "name": "Stundenplan heute"
+      },
+      "schedule_tomorrow": {
+        "name": "Stundenplan morgen"
+      },
+      "schedule_changes": {
+        "name": "Stundenplan Änderungen"
+      },
+      "grades_overall": {
+        "name": "Noten Gesamt"
+      },
+      "next_exam_days": {
+        "name": "Tage bis nächste Arbeit"
+      }
+    },
+    "todo": {
+      "homework": {
+        "name": "Hausaufgaben"
+      }
+    },
+    "calendar": {
+      "exams": {
+        "name": "Arbeiten"
+      },
+      "schedule": {
+        "name": "Stundenplan"
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -29,6 +66,11 @@
       "reauth_successful": "Neu-Authentifizierung war erfolgreich"
     }
   },
+  "exceptions": {
+    "manual_refresh_cooldown": {
+      "message": "Manuelle Aktualisierung ist noch {seconds} Sekunden lang gesperrt"
+    }
+  },
   "options": {
     "step": {
       "init": {
@@ -41,6 +83,9 @@
           "range_past_days": "Tage in der Vergangenheit",
           "range_future_days": "Tage in der Zukunft",
           "refresh_cooldown": "Abkühlzeit für manuelle Aktualisierung (Minuten, 5-30)",
+          "schedule_weeks": "Stundenplan Wochen im Voraus (1-3)",
+          "schedule_highlight": "Emoji-Hervorhebung für Änderungen/Ausfälle verwenden",
+          "schedule_hide_cancelled_no_highlight": "Ausfälle ausblenden, wenn Hervorhebung aus ist",
           "debug_dumps": "Debug-Dumps schreiben"
         }
       }

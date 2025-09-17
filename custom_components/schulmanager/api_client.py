@@ -10,19 +10,19 @@ later if we further constrain error types upstream.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 import hashlib
 import json
 import logging
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
-from .types import GradesPayload, SchedulePayload
+from .types import GradesPayload, ScheduleChange, SchedulePayload
 from .utils import common_headers, ensure_authenticated, sanitize_for_log
 
 LOGIN_URL = "https://login.schulmanager-online.de/api/login"
@@ -134,7 +134,7 @@ class SchulmanagerClient:
         async with sess.post(GET_SALT_URL, json=payload, headers=headers) as resp:
             text = await resp.text()
             try:
-                salt = json.loads(text)
+                salt = str(json.loads(text))
             except Exception:
                 await self._dump(
                     "get_salt_response.json", {"status": resp.status, "raw": text[:500]}
@@ -281,9 +281,9 @@ class SchulmanagerClient:
                     js = await r2.text()
 
                 # Try literal pattern
-                m = literal_pat.search(js)
-                if m:
-                    val = m.group(1)
+                m_lit = literal_pat.search(js)
+                if m_lit:
+                    val = m_lit.group(1)
                     self._bundle_version = val
                     await self._dump(
                         "script_probe_hit.json",
@@ -292,15 +292,15 @@ class SchulmanagerClient:
                     return val
 
                 # Try identifier pattern
-                m = ident_pat.search(js)
-                if m:
-                    ident = m.group(1)
+                m_ident = ident_pat.search(js)
+                if m_ident:
+                    ident = m_ident.group(1)
                     def_pat = re.compile(
                         rf'\b(?:const|let|var)\s+{re.escape(ident)}\s*=\s*["\']([a-f0-9]{{10}})["\']'
                     )
-                    m2 = def_pat.search(js)
-                    if m2:
-                        val = m2.group(1)
+                    m_def = def_pat.search(js)
+                    if m_def:
+                        val = m_def.group(1)
                         self._bundle_version = val
                         await self._dump(
                             "script_probe_hit.json",
@@ -309,9 +309,9 @@ class SchulmanagerClient:
                         return val
 
                 # Try near pattern
-                m = near_pat.search(js)
-                if m:
-                    val = m.group(1)
+                m_near = near_pat.search(js)
+                if m_near:
+                    val = m_near.group(1)
                     self._bundle_version = val
                     await self._dump(
                         "script_probe_hit.json",
@@ -520,12 +520,12 @@ class SchulmanagerClient:
 
 
     async def fetch_schedule_today_tomorrow(
-        self, student_id: str, class_id: int | None = None
+        self, student_id: str, class_id: int | None = None, weeks: int = 2
     ) -> SchedulePayload:
         """Optimized schedule fetching using bundle version and browser API calls."""
-        return await self._fetch_schedule_optimized(student_id)
+        return await self._fetch_schedule_optimized(student_id, weeks)
 
-    async def _fetch_schedule_optimized(self, student_id: str) -> SchedulePayload:
+    async def _fetch_schedule_optimized(self, student_id: str, weeks: int = 2) -> SchedulePayload:
         """Optimized schedule fetching using exact browser API call pattern."""
         sid = int(student_id)
         today = dt_util.now().date()
@@ -542,6 +542,7 @@ class SchulmanagerClient:
             return {
                 "today": [],
                 "tomorrow": [],
+                "week": {},
                 "changes": {"today": [], "tomorrow": [], "summary": "Keine Stundenplanänderungen für heute und morgen"},
             }
 
@@ -550,9 +551,11 @@ class SchulmanagerClient:
         if not bundle_version:
             raise RuntimeError("Could not discover bundle version")
 
-        # Calculate week range (Monday to Sunday)
+        # Calculate range: current week plus N-1 upcoming weeks
         start_of_week = today - timedelta(days=today.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
+        weeks = max(weeks, 1)
+        weeks = min(weeks, 3)
+        end_of_range = start_of_week + timedelta(days=(7 * weeks) - 1)
 
         # Create request payload exactly like the browser
         batch_payload = {
@@ -583,7 +586,7 @@ class SchulmanagerClient:
                             }
                         },
                         "start": start_of_week.isoformat(),
-                        "end": end_of_week.isoformat()
+                        "end": end_of_range.isoformat()
                     }
                 }
             ]
@@ -613,14 +616,17 @@ class SchulmanagerClient:
             return self._parse_batch_schedule_response(response_data, today)
 
     def _parse_batch_schedule_response(
-        self, response_data: dict, reference_date
+        self, response_data: dict[str, Any], reference_date: date
     ) -> SchedulePayload:
         """Parse batch response from optimized get-actual-lessons call."""
         today_iso = reference_date.isoformat()
         tomorrow_iso = (reference_date + timedelta(days=1)).isoformat()
 
-        tlist, nlist = [], []
-        changes_today, changes_tomorrow = [], []
+        tlist: list[dict[str, Any]] = []
+        nlist: list[dict[str, Any]] = []
+        week_map: dict[str, list[dict[str, Any]]] = {}
+        changes_today: list[ScheduleChange] = []
+        changes_tomorrow: list[ScheduleChange] = []
 
         # Process results from batch response
         results = response_data.get("results", [])
@@ -645,6 +651,10 @@ class SchulmanagerClient:
                                     ]  # Extract YYYY-MM-DD
                                     break
 
+                        # Group by date for calendar usage
+                        if lesson_date:
+                            week_map.setdefault(lesson_date, []).append(lesson)
+
                         if lesson_date == today_iso:
                             tlist.append(lesson)
                             # Check for changes and add to structured changes
@@ -661,6 +671,7 @@ class SchulmanagerClient:
         return {
             "today": tlist,
             "tomorrow": nlist,
+            "week": week_map,
             "changes": {
                 "today": changes_today,
                 "tomorrow": changes_tomorrow,
@@ -669,12 +680,14 @@ class SchulmanagerClient:
         }
 
 
-    def _parse_schedule_data(self, data: Any, reference_date) -> SchedulePayload:
+    def _parse_schedule_data(self, data: Any, reference_date: date) -> SchedulePayload:
         """Parse verschiedene Datenformate für Stundenpläne."""
         today_iso = reference_date.isoformat()
         tomorrow_iso = (reference_date + timedelta(days=1)).isoformat()
 
-        tlist, nlist = [], []
+        tlist: list[dict[str, Any]] = []
+        nlist: list[dict[str, Any]] = []
+        week_map: dict[str, list[dict[str, Any]]] = {}
 
         # Handle verschiedene Datenstrukturen
         if isinstance(data, list):
@@ -692,6 +705,7 @@ class SchulmanagerClient:
             return {
                 "today": [],
                 "tomorrow": [],
+                "week": {},
                 "changes": {"today": [], "tomorrow": [], "summary": "Keine Stundenplanänderungen für heute und morgen"},
             }
 
@@ -711,6 +725,9 @@ class SchulmanagerClient:
             if not date_str:
                 continue
 
+            # Fill week map for calendar usage
+            week_map.setdefault(date_str, []).append(it)
+
             if date_str == today_iso:
                 tlist.append(it)
             elif date_str == tomorrow_iso:
@@ -719,6 +736,7 @@ class SchulmanagerClient:
         return {
             "today": tlist,
             "tomorrow": nlist,
+            "week": week_map,
             "changes": {
                 "today": [],
                 "tomorrow": [],
@@ -726,7 +744,7 @@ class SchulmanagerClient:
             }
         }
 
-    def _detect_lesson_change(self, lesson: dict) -> dict | None:
+    def _detect_lesson_change(self, lesson: dict[str, Any]) -> ScheduleChange | None:
         """Detect if a lesson represents a schedule change and structure it for LLM processing."""
         lesson_type = lesson.get("type", "")
         actual_lesson = lesson.get("actualLesson", {})
@@ -744,7 +762,7 @@ class SchulmanagerClient:
         }
 
         # Basic change detection - this can be enhanced with more sophisticated logic
-        change_info = None
+        change_info: ScheduleChange | None = None
 
         if lesson_type != "regularLesson":
             # Non-regular lessons are potential changes
@@ -752,11 +770,11 @@ class SchulmanagerClient:
                 "type": change_types.get(lesson_type, lesson_type),
                 "hour": lesson.get("classHour", {}).get("number", "?"),
                 "date": lesson.get("date", ""),
-                "original_subject": None,
+                "original_subject": "",
                 "new_subject": "",
-                "original_teacher": None,
+                "original_teacher": "",
                 "new_teacher": "",
-                "original_room": None,
+                "original_room": "",
                 "new_room": "",
                 "reason": lesson.get("substitutionText", ""),
                 "note": lesson.get("comment", "")
@@ -1003,7 +1021,7 @@ class SchulmanagerClient:
         except ValueError:
             return None
 
-    def _calculate_subject_average(self, grade_categories: dict) -> float | None:
+    def _calculate_subject_average(self, grade_categories: dict[str, list[dict[str, Any]]]) -> float | None:
         """Calculate simple average of all grades in a subject."""
         if not grade_categories:
             return None
@@ -1112,23 +1130,25 @@ class SchulmanagerClient:
 
     async def _process_grades_data(self, grades_data: dict) -> GradesPayload:
         """Process raw grades data into structured format by subject."""
-        courses = grades_data.get("courses", [])
-        grading_events = grades_data.get("gradingEvents", [])
-        type_presets = grades_data.get("typePresets", [])
+        courses: list[dict[str, Any]] = grades_data.get("courses", [])
+        grading_events: list[dict[str, Any]] = grades_data.get("gradingEvents", [])
+        type_presets: list[dict[str, Any]] = grades_data.get("typePresets", [])
 
         # Create mapping from course ID to course info
-        course_map = {course["id"]: course for course in courses}
+        course_map: dict[int, dict[str, Any]] = {
+            int(course["id"]): course for course in courses if "id" in course
+        }
 
         # Create mapping from gradeTypeId to type info
-        type_map = {}
+        type_map: dict[int, dict[str, Any]] = {}
         for preset in type_presets:
             if "gradeType" in preset:
                 grade_type = preset["gradeType"]
                 type_map[grade_type["id"]] = grade_type
 
         # Group grades by subject using subjectId as the key
-        subjects = {}
-        subject_info = {}  # Map subjectId to (subject_name, abbreviation)
+        subjects: dict[int, dict[str, Any]] = {}
+        subject_info: dict[int, tuple[str, str]] = {}  # subjectId -> (name, abbr)
 
         # Create human-readable subject names and abbreviations from course data
         for course in courses:
@@ -1174,7 +1194,7 @@ class SchulmanagerClient:
 
                 # Get grade type info
                 grade_type_id = event.get("gradeTypeId")
-                grade_type_info = type_map.get(grade_type_id, {})
+                grade_type_info = type_map.get(grade_type_id if isinstance(grade_type_id, int) else -1, {})
                 grade_type_name = grade_type_info.get("name", "Sonstige")
 
                 # Create grade entry
@@ -1206,7 +1226,7 @@ class SchulmanagerClient:
                 subjects[subject_id]["grades"][grade_type_name].append(grade_entry)
 
         # Calculate averages for each subject
-        all_subject_averages = []
+        all_subject_averages: list[float] = []
         for subject_data in subjects.values():
             avg = self._calculate_subject_average(subject_data["grades"])
             subject_data["average"] = avg
@@ -1218,12 +1238,15 @@ class SchulmanagerClient:
         if all_subject_averages:
             overall_average = round(sum(all_subject_averages) / len(all_subject_averages), 2)
 
-        return {
-            "subjects": subjects,
-            "overall_average": overall_average,
-            "total_subjects": len(subjects),
-            "subjects_with_grades": len(all_subject_averages)
-        }
+        return cast(
+            GradesPayload,
+            {
+                "subjects": subjects,
+                "overall_average": overall_average,
+                "total_subjects": len(subjects),
+                "subjects_with_grades": len(all_subject_averages),
+            },
+        )
 
     async def async_update(self, enabled_features: dict[str, bool] | None = None, date_range_config: dict[str, int] | None = None) -> dict[str, Any]:
         """Pull latest data for all students and return structured dict with optional feature filtering."""
@@ -1271,15 +1294,39 @@ class SchulmanagerClient:
             # Only fetch schedule if enabled
             if enabled_features.get("schedule", True):
                 try:
-                    sch = await self.fetch_schedule_today_tomorrow(sid, cid)
+                    # Use weeks parameter if provided via date_range_config under key 'schedule_weeks'
+                    weeks = 2
+                    try:
+                        weeks = int((date_range_config or {}).get("schedule_weeks", 2))
+                    except Exception:
+                        weeks = 2
+                    sch = await self.fetch_schedule_today_tomorrow(sid, cid, weeks)
                     result["schedule"][sid] = sch
                 except Exception as err:
                     _LOGGER.warning(
                         "Schulmanager: schedule fetch failed for %s: %s", sid, err
                     )
-                    result["schedule"][sid] = {"today": [], "tomorrow": []}
+                    result["schedule"][sid] = {
+                        "today": [],
+                        "tomorrow": [],
+                        "week": {},
+                        "changes": {
+                            "today": [],
+                            "tomorrow": [],
+                            "summary": "Keine Stundenplanänderungen für heute und morgen",
+                        },
+                    }
             else:
-                result["schedule"][sid] = {"today": [], "tomorrow": []}
+                result["schedule"][sid] = {
+                    "today": [],
+                    "tomorrow": [],
+                    "week": {},
+                    "changes": {
+                        "today": [],
+                        "tomorrow": [],
+                        "summary": "Keine Stundenplanänderungen für heute und morgen",
+                    },
+                }
 
             # Only fetch exams if enabled
             if enabled_features.get("exams", True):

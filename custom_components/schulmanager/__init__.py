@@ -22,6 +22,7 @@ from .const import (
     DOMAIN,
     OPT_DEBUG_DUMPS,
     OPT_ENABLE_EXAMS,
+    OPT_ENABLE_GRADES,
     OPT_ENABLE_HOMEWORK,
     OPT_ENABLE_SCHEDULE,
     VERSION,
@@ -71,6 +72,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     enable_homework = bool(options.get(OPT_ENABLE_HOMEWORK, True))
     enable_schedule = bool(options.get(OPT_ENABLE_SCHEDULE, True))
     enable_exams = bool(options.get(OPT_ENABLE_EXAMS, True))
+    enable_grades = bool(options.get(OPT_ENABLE_GRADES, True))
 
     client = SchulmanagerClient(
         hass,
@@ -142,14 +144,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up platforms based on enabled features
     platforms_to_load = []
 
-    if enable_schedule:
-        platforms_to_load.append(Platform.SENSOR)  # Schedule sensors
+    # Load sensors when any sensor-producing feature is enabled
+    if enable_schedule or enable_exams or enable_grades:
+        platforms_to_load.append(Platform.SENSOR)
 
     if enable_homework:
         platforms_to_load.append(Platform.TODO)  # Homework todo lists
 
-    if enable_exams:
-        platforms_to_load.append(Platform.CALENDAR)  # Exam calendar
+    if enable_exams or enable_schedule:
+        platforms_to_load.append(Platform.CALENDAR)  # Exam and/or schedule calendar
 
     # Always load button for manual refresh
     platforms_to_load.append(Platform.BUTTON)
@@ -178,16 +181,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     enable_homework = bool(options.get(OPT_ENABLE_HOMEWORK, True))
     enable_schedule = bool(options.get(OPT_ENABLE_SCHEDULE, True))
     enable_exams = bool(options.get(OPT_ENABLE_EXAMS, True))
+    enable_grades = bool(options.get(OPT_ENABLE_GRADES, True))
 
     platforms_to_unload = []
 
-    if enable_schedule:
+    # Unload sensors if any of their contributing features were enabled
+    if enable_schedule or enable_exams or enable_grades:
         platforms_to_unload.append(Platform.SENSOR)
 
     if enable_homework:
         platforms_to_unload.append(Platform.TODO)
 
-    if enable_exams:
+    if enable_exams or enable_schedule:
         platforms_to_unload.append(Platform.CALENDAR)
 
     platforms_to_unload.append(Platform.BUTTON)

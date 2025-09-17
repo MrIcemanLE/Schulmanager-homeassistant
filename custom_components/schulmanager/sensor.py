@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -19,8 +19,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, VERSION
+from .const import DOMAIN
 from .coordinator import SchulmanagerCoordinator
+from .types import IntegrationData
 from .util import normalize_student_slug
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,7 +44,10 @@ async def async_setup_entry(
         return
     entities: list[SensorEntity] = []
 
-    for st in (coord.data or {}).get("students", []):
+    data = cast(IntegrationData | None, coord.data)
+    students: list[dict[str, Any]] = [] if data is None else data.get("students", [])
+
+    for st in students:
         sid = st["id"]
         name = st["name"]
         slug = normalize_student_slug(name)
@@ -53,8 +57,10 @@ async def async_setup_entry(
 
         # Add grade sensors for each subject
         # We'll check for available subjects from the first update
-        grades_data = coord.data.get("grades", {}).get(sid, {}) if coord.data else {}
-        subjects = grades_data.get("subjects", {})
+        grades_data: dict[str, Any] = (
+            {} if data is None else cast(dict[str, Any], data.get("grades", {}).get(sid, {}))
+        )
+        subjects: dict[int, dict[str, Any]] = cast(dict[int, dict[str, Any]], grades_data.get("subjects", {}))
 
         for subject_id, subject_data in subjects.items():
             subject_name = subject_data.get("name", f"Fach {subject_id}")
@@ -86,8 +92,10 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         self.day = day
         # Stable unique ID based on immutable student ID
         self._attr_unique_id = f"schulmanager_{self.student_id}_schedule_{day}"
-        pretty = "heute" if day == "today" else "morgen"
-        self._attr_name = f"Stundenplan {pretty}"
+        # Use translations for entity name
+        self._attr_translation_key = (
+            "schedule_today" if day == "today" else "schedule_tomorrow"
+        )
         self._attr_icon = "mdi:school-outline"
 
     @property
@@ -110,10 +118,11 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     @property
     def native_value(self) -> StateType:
         """Return the state of the sensor."""
-        data = (
-            (self.coordinator.data or {}).get("schedule", {}).get(self.student_id, {})
-        )
-        items = data.get(self.day, [])
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        items: list[dict[str, Any]] = []
+        if integ is not None:
+            sched = cast(dict[str, Any], integ.get("schedule", {}).get(self.student_id, {}))
+            items = cast(list[dict[str, Any]], sched.get(self.day, []) or [])
 
         # Check if today/tomorrow is a weekend
         if self._is_weekend_day():
@@ -136,10 +145,11 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return the state attributes."""
-        data = (
-            (self.coordinator.data or {}).get("schedule", {}).get(self.student_id, {})
-        )
-        items = data.get(self.day, [])
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        items: list[dict[str, Any]] = []
+        if integ is not None:
+            sched = cast(dict[str, Any], integ.get("schedule", {}).get(self.student_id, {}))
+            items = cast(list[dict[str, Any]], sched.get(self.day, []) or [])
 
         # Structure the raw data properly as JSON
         raw_data: dict[str, Any] = {
@@ -154,8 +164,6 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
 
         rows = []
         for lesson in items:
-            if not isinstance(lesson, dict):
-                continue
 
             # Extract data from new structure
             class_hour = lesson.get("classHour", {})
@@ -270,7 +278,7 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
         self.student_name = student_name
         # Stable unique ID based on immutable student ID
         self._attr_unique_id = f"schulmanager_{self.student_id}_schedule_changes"
-        self._attr_name = "Stundenplan Änderungen"
+        self._attr_translation_key = "schedule_changes"
         self._attr_icon = "mdi:calendar-alert"
 
     @property
@@ -293,10 +301,11 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
     @property
     def native_value(self) -> StateType:
         """Return the state of the sensor - total number of changes."""
-        data = (
-            (self.coordinator.data or {}).get("schedule", {}).get(self.student_id, {})
-        )
-        changes = data.get("changes", {})
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        changes: dict[str, Any] = {}
+        if integ is not None:
+            sched = cast(dict[str, Any], integ.get("schedule", {}).get(self.student_id, {}))
+            changes = cast(dict[str, Any], sched.get("changes", {}) or {})
 
         today_changes = len(changes.get("today", []))
         tomorrow_changes = len(changes.get("tomorrow", []))
@@ -305,10 +314,11 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return the structured schedule changes for LLM processing."""
-        data = (
-            (self.coordinator.data or {}).get("schedule", {}).get(self.student_id, {})
-        )
-        changes = data.get("changes", {})
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        changes: dict[str, Any] = {}
+        if integ is not None:
+            sched = cast(dict[str, Any], integ.get("schedule", {}).get(self.student_id, {}))
+            changes = cast(dict[str, Any], sched.get("changes", {}) or {})
 
         if not changes:
             return {
@@ -331,13 +341,14 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
         total_changes = len(today_changes) + len(tomorrow_changes)
 
         # Create LLM-optimized structured data
-        llm_data = {
+        detailed_changes: list[dict[str, Any]] = []
+        llm_data: dict[str, Any] = {
             "has_changes": total_changes > 0,
             "total_changes": total_changes,
             "today_count": len(today_changes),
             "tomorrow_count": len(tomorrow_changes),
             "natural_language_summary": changes.get("summary", "No changes detected"),
-            "detailed_changes": []
+            "detailed_changes": detailed_changes,
         }
 
         # Add detailed changes for LLM processing
@@ -354,7 +365,7 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
                     "note": change.get("note", ""),
                     "date": change.get("date", "")
                 }
-                llm_data["detailed_changes"].append(detail)
+                detailed_changes.append(detail)
 
         return {
             "changes": changes,
@@ -384,7 +395,7 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         # Stable unique ID based on immutable student and subject IDs
         self._attr_unique_id = f"schulmanager_{self.student_id}_grades_{self.subject_id!s}"
 
-        # Simple name: just "Noten" + subject abbreviation (device connection shows student)
+        # Keep dynamic name since it includes subject abbreviation
         self._attr_name = f"Noten {subject_abbrev}"
         self._attr_icon = "mdi:school"
 
@@ -441,8 +452,9 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     @property
     def native_value(self) -> StateType:
         """Return the average grade for this subject (if available)."""
-        grades_data = (
-            (self.coordinator.data or {}).get("grades", {}).get(self.student_id, {})
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        grades_data: dict[str, Any] = (
+            {} if integ is None else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
         )
         subjects: dict[int, Any] = grades_data.get("subjects", {})
         subject_data = subjects.get(self.subject_id, {})
@@ -462,8 +474,9 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return the detailed grade information by category."""
-        grades_data = (
-            (self.coordinator.data or {}).get("grades", {}).get(self.student_id, {})
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        grades_data: dict[str, Any] = (
+            {} if integ is None else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
         )
         subjects: dict[int, Any] = grades_data.get("subjects", {})
         subject_data = subjects.get(self.subject_id, {})
@@ -478,14 +491,16 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
                 "grades_summary_markdown": "_Keine Noten verfügbar_",
             }
 
-        grade_categories = subject_data.get("grades", {})
+        grade_categories: dict[str, list[dict[str, Any]]] = cast(
+            dict[str, list[dict[str, Any]]], subject_data.get("grades", {})
+        )
         total_grades = 0
 
         # Count total grades and prepare category data with numeric values
-        category_summary = {}
+        category_summary: dict[str, dict[str, Any]] = {}
         for category, grades_list in grade_categories.items():
             # Process grades to include numeric values
-            processed_grades = []
+            processed_grades: list[dict[str, Any]] = []
             for grade in grades_list:
                 grade_info = dict(grade)  # Copy original grade data
                 grade_value = grade.get("value", "")
@@ -506,7 +521,7 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
                 total_grades += len(processed_grades)
 
         # Extract numeric grade values (German grades are always numeric 1-6)
-        all_grade_values = []
+        all_grade_values: list[float] = []
         for grades_list in grade_categories.values():
             for grade in grades_list:
                 grade_value = grade.get("value", "")
@@ -552,7 +567,7 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
             lines_text.append(f"Durchschnitt: {statistics['average']}")
             lines_md.append(f"**Durchschnitt:** {statistics['average']}")
         for category, data in category_summary.items():
-            grades_list = data["grades"]
+            grades_list = cast(list[dict[str, Any]], data["grades"])
             if not grades_list:
                 continue
             lines_text.append(f"{category} ({len(grades_list)}):")
@@ -595,8 +610,8 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
         # Stable unique ID based on immutable student ID
         self._attr_unique_id = f"schulmanager_{self.student_id}_grades_overall"
 
-        # Simple name: "Noten Gesamt"
-        self._attr_name = "Noten Gesamt"
+        # Use translation for entity name
+        self._attr_translation_key = "grades_overall"
         self._attr_icon = "mdi:school"
 
     def _parse_german_grade(self, grade_value: str | float) -> float | None:
@@ -652,8 +667,9 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
     @property
     def native_value(self) -> StateType:
         """Return the overall average grade for this student."""
-        grades_data = (
-            (self.coordinator.data or {}).get("grades", {}).get(self.student_id, {})
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        grades_data: dict[str, Any] = (
+            {} if integ is None else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
         )
 
         overall_average = grades_data.get("overall_average")
@@ -669,8 +685,9 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return the overall grade statistics."""
-        grades_data = (
-            (self.coordinator.data or {}).get("grades", {}).get(self.student_id, {})
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        grades_data: dict[str, Any] = (
+            {} if integ is None else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
         )
 
         if not grades_data:
@@ -684,8 +701,10 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
             }
 
         # Collect subject averages
-        subjects = grades_data.get("subjects", {})
-        subject_averages = {}
+        subjects: dict[int, dict[str, Any]] = cast(
+            dict[int, dict[str, Any]], grades_data.get("subjects", {})
+        )
+        subject_averages: dict[str, Any] = {}
 
         for subject_id, subject_data in subjects.items():
             subject_name = subject_data.get("name", f"Fach {subject_id}")
@@ -745,8 +764,8 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
         # Stable unique ID based on immutable student ID
         self._attr_unique_id = f"schulmanager_{self.student_id}_next_exam_days"
 
-        # Simple name: "Tage bis nächste Arbeit"
-        self._attr_name = "Tage bis nächste Arbeit"
+        # Use translation for entity name
+        self._attr_translation_key = "next_exam_days"
         self._attr_icon = "mdi:calendar-clock"
 
     @property
@@ -757,7 +776,6 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
             name=self.student_name,
             manufacturer="Schulmanager Online",
             model="Schüler",
-            sw_version=VERSION,
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
         )
@@ -770,7 +788,8 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
     @property
     def native_value(self) -> StateType:
         """Return days until next exam."""
-        items = (self.coordinator.data or {}).get("exams", {}).get(self.student_id, [])
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        items: list[dict[str, Any]] = [] if integ is None else cast(list[dict[str, Any]], integ.get("exams", {}).get(self.student_id, []) or [])
         if not items:
             return None
 
@@ -814,7 +833,8 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return additional exam information."""
-        items = (self.coordinator.data or {}).get("exams", {}).get(self.student_id, [])
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        items: list[dict[str, Any]] = [] if integ is None else cast(list[dict[str, Any]], integ.get("exams", {}).get(self.student_id, []) or [])
         if not items:
             return {
                 "next_exam": None,

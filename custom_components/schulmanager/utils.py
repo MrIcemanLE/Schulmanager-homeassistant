@@ -119,7 +119,11 @@ def get_validated_auto_update_interval(config_entry: ConfigEntry) -> int:
 def get_validated_refresh_cooldown(config_entry: ConfigEntry) -> int:
     """Get and validate the refresh cooldown from config."""
     options = config_entry.options
-    cooldown_minutes = options.get(OPT_REFRESH_COOLDOWN, DEFAULT_REFRESH_COOLDOWN)
+    cooldown_raw = options.get(OPT_REFRESH_COOLDOWN, DEFAULT_REFRESH_COOLDOWN)
+    try:
+        cooldown_minutes = int(cooldown_raw)
+    except (TypeError, ValueError):
+        cooldown_minutes = DEFAULT_REFRESH_COOLDOWN
     # Validate range
     return max(MIN_REFRESH_COOLDOWN, min(MAX_REFRESH_COOLDOWN, cooldown_minutes))
 
