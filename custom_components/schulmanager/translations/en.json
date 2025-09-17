@@ -1,0 +1,94 @@
+{
+  "entity": {
+    "button": {
+      "refresh": {
+        "name": "Update now"
+      }
+    },
+    "sensor": {
+      "schedule_today": {
+        "name": "Schedule today"
+      },
+      "schedule_tomorrow": {
+        "name": "Schedule tomorrow"
+      },
+      "schedule_changes": {
+        "name": "Schedule changes"
+      },
+      "grades_overall": {
+        "name": "Grades overall"
+      },
+      "next_exam_days": {
+        "name": "Days until next exam"
+      }
+    },
+    "todo": {
+      "homework": {
+        "name": "Homework"
+      }
+    },
+    "calendar": {
+      "exams": {
+        "name": "Exams"
+      },
+      "schedule": {
+        "name": "Schedule"
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Schulmanager",
+        "description": "Sign in with your Schulmanager credentials.",
+        "data": {
+          "username": "E-mail",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Schulmanager",
+        "description": "Please re-enter your credentials to restore access.",
+        "data": {
+          "username": "E-mail",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid authentication",
+      "cannot_connect": "Unable to connect",
+      "no_students": "No students found in your account",
+      "unknown": "Unknown error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Reauthentication was successful"
+    }
+  },
+  "exceptions": {
+    "manual_refresh_cooldown": {
+      "message": "Manual refresh is locked for {seconds} more seconds"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Schulmanager Options",
+        "data": {
+          "enable_homework": "Fetch homework",
+          "enable_schedule": "Fetch schedule",
+          "enable_exams": "Fetch exams",
+          "enable_grades": "Fetch grades",
+          "range_past_days": "Days in the past",
+          "range_future_days": "Days in the future",
+          "refresh_cooldown": "Manual refresh cooldown (minutes, 5-30)",
+          "schedule_weeks": "Schedule weeks ahead (1-3)",
+          "schedule_highlight": "Use emoji highlighting for changes/cancellations",
+          "schedule_hide_cancelled_no_highlight": "Hide cancellations when highlighting is off",
+          "debug_dumps": "Write debug dumps"
+        }
+      }
+    }
+  }
+}

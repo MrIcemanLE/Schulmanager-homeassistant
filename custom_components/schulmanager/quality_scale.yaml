@@ -1,0 +1,22 @@
+rules:
+  # Bronze (mandatory)
+  config-flow: done
+  entity-unique-id: done
+  devices: done
+  diagnostics: done
+  codeowners: done
+
+  # Silver
+  entity-unavailable: done
+  reauth-flow: done
+  runtime-data: done
+  translations: done
+
+  # Gold
+  parallel-updates:
+    status: exempt
+    comment: Single coordinator update covers all platforms
+
+  # Platinum
+  strict-typing: todo
+  tests-coverage: todo

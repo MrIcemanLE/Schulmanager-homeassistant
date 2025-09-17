@@ -1,0 +1,20 @@
+{
+  "domain": "schulmanager",
+  "name": "Schulmanager Online",
+  "codeowners": [
+    "@MrIcemanLE"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/MrIcemanLE/Schulmanager-homeassistant/blob/main/README.md",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/MrIcemanLE/Schulmanager-homeassistant/issues",
+  "loggers": [
+    "custom_components.schulmanager"
+  ],
+  "requirements": [
+    "python-dateutil>=2.9.0.post0"
+  ],
+  "quality_scale": "silver",
+  "version": "0.5.0"
+}
