@@ -35,6 +35,8 @@ class SchedulePayload(TypedDict):
 
     today: list[dict[str, Any]]
     tomorrow: list[dict[str, Any]]
+    # Map of ISO date (YYYY-MM-DD) to list of lessons for the current week
+    week: dict[str, list[dict[str, Any]]]
     changes: ScheduleChanges
 
 

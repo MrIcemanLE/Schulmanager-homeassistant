@@ -14,6 +14,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, VERSION
+from .coordinator import SchulmanagerCoordinator
 from .utils import get_validated_refresh_cooldown
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,18 +30,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             entry.entry_id,
         )
         return
-    async_add_entities([RefreshButton(coord)])
+    async_add_entities([RefreshButton(entry, coord)])
 
 class RefreshButton(ButtonEntity):
     """Button entity for manual refresh with cooldown support."""
-
-    _attr_name = "Schulmanager jetzt aktualisieren"
+    _attr_has_entity_name = True
+    _attr_translation_key = "refresh"
     _attr_icon = "mdi:book-sync"
 
-    def __init__(self, coordinator) -> None:
+    def __init__(self, entry: ConfigEntry, coordinator: SchulmanagerCoordinator) -> None:
         """Initialize the refresh button."""
         self.coordinator = coordinator
-        self.config_entry = coordinator.config_entry
+        self.config_entry = entry
         # Stable unique ID per config entry
         self._attr_unique_id = f"schulmanager_{self.config_entry.entry_id}_refresh"
 

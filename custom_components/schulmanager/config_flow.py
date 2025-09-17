@@ -31,6 +31,9 @@ from .const import (
     OPT_RANGE_FUTURE_DAYS,
     OPT_RANGE_PAST_DAYS,
     OPT_REFRESH_COOLDOWN,
+    OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT,
+    OPT_SCHEDULE_HIGHLIGHT,
+    OPT_SCHEDULE_WEEKS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,6 +50,7 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Config flow for the Schulmanager integration."""
 
     VERSION = 1
+    MINOR_VERSION = 1
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -103,7 +107,7 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     # Reauthentication support
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:  # type: ignore[override]
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Start reauthentication step for updating credentials."""
         entry_id = self.context.get("entry_id")
         if not isinstance(entry_id, str):
@@ -232,6 +236,25 @@ class SchulmanagerOptionsFlowHandler(OptionsFlow):
                         OPT_REFRESH_COOLDOWN, DEFAULT_OPTIONS[OPT_REFRESH_COOLDOWN]
                     ),
                 ): vol.All(cv.positive_int, vol.Range(min=MIN_REFRESH_COOLDOWN, max=MAX_REFRESH_COOLDOWN)),
+                vol.Required(
+                    OPT_SCHEDULE_WEEKS,
+                    default=opts.get(
+                        OPT_SCHEDULE_WEEKS, DEFAULT_OPTIONS[OPT_SCHEDULE_WEEKS]
+                    ),
+                ): vol.All(cv.positive_int, vol.Range(min=1, max=3)),
+                vol.Required(
+                    OPT_SCHEDULE_HIGHLIGHT,
+                    default=opts.get(
+                        OPT_SCHEDULE_HIGHLIGHT, DEFAULT_OPTIONS[OPT_SCHEDULE_HIGHLIGHT]
+                    ),
+                ): cv.boolean,
+                vol.Required(
+                    OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT,
+                    default=opts.get(
+                        OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT,
+                        DEFAULT_OPTIONS[OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT],
+                    ),
+                ): cv.boolean,
                 vol.Required(
                     OPT_DEBUG_DUMPS,
                     default=opts.get(OPT_DEBUG_DUMPS, DEFAULT_OPTIONS[OPT_DEBUG_DUMPS]),

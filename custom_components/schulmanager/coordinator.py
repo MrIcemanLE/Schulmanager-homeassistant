@@ -1,18 +1,23 @@
-
 """Coordinator for Schulmanager client updates and cooldown management."""
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import timedelta
 import logging
-from typing import Any, Iterator, Union
+from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import OPT_RANGE_FUTURE_DAYS, OPT_RANGE_PAST_DAYS
+from .const import (
+    DEFAULT_SCHEDULE_WEEKS,
+    OPT_RANGE_FUTURE_DAYS,
+    OPT_RANGE_PAST_DAYS,
+    OPT_SCHEDULE_WEEKS,
+)
 from .types import IntegrationData
 from .utils import (
     CooldownManager,
@@ -64,7 +69,18 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
             "future_days": int(options.get(OPT_RANGE_FUTURE_DAYS, 180)),
         }
 
-        _LOGGER.debug("Fetching data with features: %s and date range: %s", enabled_features, date_range_config)
+        # Determine schedule weeks (1-3)
+        weeks_raw = int(options.get(OPT_SCHEDULE_WEEKS, DEFAULT_SCHEDULE_WEEKS))
+        schedule_weeks = max(1, min(3, weeks_raw))
+
+        date_range_config["schedule_weeks"] = schedule_weeks
+
+        _LOGGER.debug(
+            "Fetching data with features: %s, schedule_weeks=%s and date range: %s",
+            enabled_features,
+            schedule_weeks,
+            date_range_config,
+        )
         data = await self.client.async_update(enabled_features, date_range_config)
 
         # Detect new homework/grades after the first successful refresh only
@@ -78,7 +94,7 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
         except Exception as err:  # noqa: BLE001 - defensive guard, do not break updates
             _LOGGER.debug("Event detection error: %s", err)
 
-        return data
+        return cast(IntegrationData, data)
 
     def _seed_seen_sets(self, data: dict[str, Any]) -> None:
         for st in data.get("students", []):
@@ -90,7 +106,7 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
                 if key:
                     self._seen_homework.add(key)
             grades = data.get("grades", {}).get(sid, {}) or {}
-            for gkey in self._iter_grade_keys(sid, grades):
+            for gkey in self._iter_grade_keys_only(sid, grades):
                 self._seen_grades.add(gkey)
 
     def _detect_and_fire_events(self, data: dict[str, Any]) -> None:
@@ -114,7 +130,7 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
 
         # Grades
         for sid, grades in (data.get("grades", {}) or {}).items():
-            for gkey, payload in self._iter_grade_keys(sid, grades, return_payload=True):
+            for gkey, payload in self._iter_grade_keys_with_payload(sid, grades):
                 if gkey in self._seen_grades:
                     continue
                 self._seen_grades.add(gkey)
@@ -137,9 +153,22 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
             return None
         return f"{sid}:{date}:{subject}:{hw}"
 
-    def _iter_grade_keys(
-        self, sid: str, grades: dict[str, Any], return_payload: bool = False
-    ) -> Iterator[Union[str, tuple[str, dict[str, Any]]]]:
+    def _iter_grade_keys_only(self, sid: str, grades: dict[str, Any]) -> Iterator[str]:
+        """Iterate only grade keys for change detection sets."""
+        subjects = grades.get("subjects", {}) or {}
+        for subject_id, subject in subjects.items():
+            for category, grades_list in (subject.get("grades") or {}).items():
+                for g in grades_list or []:
+                    orig = str(g.get("original_value", g.get("value", "")))
+                    date = str(g.get("date", ""))
+                    topic = str(g.get("topic", ""))
+                    gkey = f"{sid}:{subject_id}:{category}:{date}:{orig}:{topic}"
+                    yield gkey
+
+    def _iter_grade_keys_with_payload(
+        self, sid: str, grades: dict[str, Any]
+    ) -> Iterator[tuple[str, dict[str, Any]]]:
+        """Iterate grade keys along with payload details for events."""
         subjects = grades.get("subjects", {}) or {}
         for subject_id, subject in subjects.items():
             subject_name = subject.get("name", f"Fach {subject_id}")
@@ -149,14 +178,11 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
                     date = str(g.get("date", ""))
                     topic = str(g.get("topic", ""))
                     gkey = f"{sid}:{subject_id}:{category}:{date}:{orig}:{topic}"
-                    if return_payload:
-                        yield gkey, {
-                            "subject_id": subject_id,
-                            "subject_name": subject_name,
-                            "grade": g,
-                        }
-                    else:
-                        yield gkey
+                    yield gkey, {
+                        "subject_id": subject_id,
+                        "subject_name": subject_name,
+                        "grade": g,
+                    }
 
     def is_manual_refresh_allowed(self) -> bool:
         """Check if a manual refresh is allowed (not in cooldown)."""
@@ -171,8 +197,9 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
         if not self.is_manual_refresh_allowed():
             remaining = self.get_cooldown_remaining_seconds()
             raise HomeAssistantError(
-                f"Manuelle Aktualisierung ist noch {remaining} Sekunden lang gesperrt. "
-                f"Bitte warten Sie, bevor Sie erneut aktualisieren."
+                translation_domain="schulmanager",
+                translation_key="manual_refresh_cooldown",
+                translation_placeholders={"seconds": str(remaining)},
             )
 
         # Record the manual refresh time

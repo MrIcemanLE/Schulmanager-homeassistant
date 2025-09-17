@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.todo import TodoItem, TodoItemStatus, TodoListEntity
 from homeassistant.components.todo.const import TodoListEntityFeature
@@ -81,8 +81,8 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         self.student_name = student_name
         # Stable unique ID based on immutable student ID
         self._attr_unique_id = f"schulmanager_{self.student_id}_homework"
-        # Entity name combines with device name when has_entity_name=True
-        self._attr_name = "Hausaufgaben"
+        # Entity name via translations
+        self._attr_translation_key = "homework"
         self._attr_icon = "mdi:clipboard-check-multiple-outline"
         self._attr_todo_items: list[TodoItem] | None = None
 
@@ -119,8 +119,10 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        coord_data = self.coordinator.data or {}
-        homework_data = coord_data.get("homework", {})
+        coord_data = cast(dict[str, Any] | None, self.coordinator.data)
+        homework_data: dict[str, list[dict[str, Any]]] = (
+            {} if coord_data is None else cast(dict[str, list[dict[str, Any]]], coord_data.get("homework", {}))
+        )
         student_homework = homework_data.get(self.student_id, [])
 
         _LOGGER.debug(
@@ -146,9 +148,6 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
             current_uids = set()
 
             for item in student_homework:
-                if not isinstance(item, dict):
-                    continue
-
                 # Debug: Zeige Item-Details
                 _LOGGER.debug("Processing homework item: %s", item)
 

@@ -16,7 +16,8 @@ def _get_version() -> str:
         manifest_path = Path(__file__).parent / "manifest.json"
         with manifest_path.open() as f:
             manifest = json.load(f)
-            return manifest.get("version", "unknown")
+            version = manifest.get("version", "unknown")
+            return str(version)
     except Exception:  # noqa: BLE001 - fall back to unknown version on any read error
         return "unknown"
 
@@ -34,6 +35,11 @@ OPT_ENABLE_GRADES: Final = "enable_grades"
 OPT_RANGE_PAST_DAYS: Final = "range_past_days"
 OPT_RANGE_FUTURE_DAYS: Final = "range_future_days"
 OPT_REFRESH_COOLDOWN: Final = "refresh_cooldown"  # Minutes (5-30)
+OPT_SCHEDULE_WEEKS: Final = "schedule_weeks"  # Weeks ahead to fetch (1-3)
+OPT_SCHEDULE_HIGHLIGHT: Final = "schedule_highlight"  # Use emoji highlighting in calendar
+OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT: Final = (
+    "schedule_hide_cancelled_no_highlight"
+)  # Hide cancellations when highlight is off
 
 # Debug dumps toggle
 OPT_DEBUG_DUMPS: Final = "debug_dumps"
@@ -47,6 +53,9 @@ DEFAULT_ENABLE_GRADES: Final = True
 DEFAULT_RANGE_PAST_DAYS: Final = 30
 DEFAULT_RANGE_FUTURE_DAYS: Final = 180
 DEFAULT_REFRESH_COOLDOWN: Final = 5  # 5 minutes cooldown between manual refreshes
+DEFAULT_SCHEDULE_WEEKS: Final = 2  # current week + N-1 upcoming weeks
+DEFAULT_SCHEDULE_HIGHLIGHT: Final = True
+DEFAULT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT: Final = False
 
 DEFAULT_DEBUG_DUMPS: Final = True
 MIN_REFRESH_COOLDOWN: Final = 5  # Minimum 5 minutes
@@ -61,6 +70,9 @@ DEFAULT_OPTIONS: Final = {
     OPT_RANGE_PAST_DAYS: DEFAULT_RANGE_PAST_DAYS,
     OPT_RANGE_FUTURE_DAYS: DEFAULT_RANGE_FUTURE_DAYS,
     OPT_REFRESH_COOLDOWN: DEFAULT_REFRESH_COOLDOWN,
+    OPT_SCHEDULE_WEEKS: DEFAULT_SCHEDULE_WEEKS,
+    OPT_SCHEDULE_HIGHLIGHT: DEFAULT_SCHEDULE_HIGHLIGHT,
+    OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT: DEFAULT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT,
     OPT_DEBUG_DUMPS: DEFAULT_DEBUG_DUMPS,
 }
 
