@@ -1,0 +1,10 @@
+{
+  "repo": "MrIcemanLE/Schulmanager-homeassistant",
+  "tag_prefix": "v",
+  "title_from_tag": true,
+  "notes_source": "CHANGELOG.md",
+  "notes_language": "de",
+  "verify_tag": true,
+  "latest": true,
+  "hacs_use_releases": true
+}
