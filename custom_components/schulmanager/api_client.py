@@ -42,6 +42,7 @@ class SchulmanagerClient:
         username: str,
         password: str,
         debug_dumps: bool = False,
+        institution_id: int | None = None,
     ) -> None:
         """Initialize the service client with credentials and HA context."""
         self.hass = hass
@@ -53,6 +54,7 @@ class SchulmanagerClient:
         self._subjects_cache: dict[int, dict[str, Any]] = {}
         self.debug_dumps = debug_dumps
         self.data: dict[str, Any] | None = None
+        self._institution_id: int | None = institution_id
 
     async def _dump(self, name: str, data: Any) -> None:
         """Save debug data to file if debug dumps are enabled."""
@@ -113,6 +115,10 @@ class SchulmanagerClient:
         """Return True if bundle version is available."""
         return self._bundle_version is not None
 
+    def get_institution_id(self) -> int | None:
+        """Return the institution ID if available."""
+        return self._institution_id
+
     async def _fetch_salt(self, email: str) -> str:
         """Fetch salt for password hashing."""
         sess = async_get_clientsession(self.hass)
@@ -171,7 +177,7 @@ class SchulmanagerClient:
             "mobileApp": False,
             "userId": None,
             "twoFactorCode": None,
-            "institutionId": None,
+            "institutionId": self._institution_id,
         }
 
         await self._dump(
@@ -203,6 +209,13 @@ class SchulmanagerClient:
 
             self._token = data["jwt"]
             user = data.get("user") or {}
+
+            # Extract and store institutionId if not already set
+            if self._institution_id is None:
+                self._institution_id = user.get("institutionId")
+                if self._institution_id:
+                    _LOGGER.debug("Extracted institutionId from login: %s", self._institution_id)
+
             parents = user.get("associatedParents") or []
             self._students = []
 

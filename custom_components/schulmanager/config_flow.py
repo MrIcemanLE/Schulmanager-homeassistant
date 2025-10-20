@@ -63,11 +63,12 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Test the connection and get student data
         try:
+            # Enable debug dumps during config flow to help diagnose login issues
             hub = SchulmanagerClient(
                 self.hass,
                 user_input[CONF_USERNAME],
                 user_input[CONF_PASSWORD],
-                debug_dumps=False,
+                debug_dumps=True,
             )
 
             # Test login and get student data
@@ -86,9 +87,15 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
                 # Store student data for device creation
                 self._students_data = students
 
-        except Exception:
+        except Exception as err:
             _LOGGER.exception("Failed to connect to Schulmanager")
             errors["base"] = "cannot_connect"
+
+            # Log path to debug dumps for troubleshooting
+            _LOGGER.error(
+                "Login failed. Debug dumps are available in: "
+                "config/custom_components/schulmanager/debug/"
+            )
 
         if errors:
             return self.async_show_form(step_id="user", data_schema=USER_SCHEMA, errors=errors)
@@ -97,12 +104,19 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(user_input[CONF_USERNAME].lower())
         self._abort_if_unique_id_configured()
 
+        # Store institutionId if available (for multi-school support)
+        institution_id = hub.get_institution_id()
+        entry_data = {
+            CONF_USERNAME: user_input[CONF_USERNAME],
+            CONF_PASSWORD: user_input[CONF_PASSWORD],
+        }
+        if institution_id is not None:
+            entry_data["institution_id"] = institution_id
+            _LOGGER.info("Stored institutionId %s for multi-school support", institution_id)
+
         return self.async_create_entry(
             title="Schulmanager Online",
-            data={
-                CONF_USERNAME: user_input[CONF_USERNAME],
-                CONF_PASSWORD: user_input[CONF_PASSWORD],
-            },
+            data=entry_data,
             options=DEFAULT_OPTIONS.copy(),
         )
 

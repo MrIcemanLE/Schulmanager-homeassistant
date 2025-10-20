@@ -16,5 +16,5 @@
     "python-dateutil>=2.9.0.post0"
   ],
   "quality_scale": "silver",
-  "version": "0.5.1"
+  "version": "0.5.2"
 }
