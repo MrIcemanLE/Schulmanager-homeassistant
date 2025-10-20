@@ -151,6 +151,19 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
             sched = cast(dict[str, Any], integ.get("schedule", {}).get(self.student_id, {}))
             items = cast(list[dict[str, Any]], sched.get(self.day, []) or [])
 
+        # Sort items by class hour number to ensure correct order in HTML table
+        def get_hour_number(lesson: dict[str, Any]) -> int:
+            """Extract hour number from lesson, defaulting to 999 for sorting."""
+            class_hour = lesson.get("classHour", {})
+            hour = class_hour.get("number")
+            if isinstance(hour, int):
+                return hour
+            if isinstance(hour, str) and hour.isdigit():
+                return int(hour)
+            return 999  # Place lessons without hour number at the end
+
+        items_sorted = sorted(items, key=get_hour_number)
+
         # Structure the raw data properly as JSON
         raw_data: dict[str, Any] = {
             "lessons": [],
@@ -163,7 +176,7 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
             return f"<td>{x}</td>"
 
         rows = []
-        for lesson in items:
+        for lesson in items_sorted:
 
             # Extract data from new structure
             class_hour = lesson.get("classHour", {})
