@@ -74,11 +74,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     enable_exams = bool(options.get(OPT_ENABLE_EXAMS, True))
     enable_grades = bool(options.get(OPT_ENABLE_GRADES, True))
 
+    # Get institutionId from entry data (for multi-school support)
+    institution_id = entry.data.get("institution_id")
+    if institution_id is not None:
+        _LOGGER.debug("Using institutionId %s from config entry", institution_id)
+
     client = SchulmanagerClient(
         hass,
         entry.data[CONF_USERNAME],
         entry.data[CONF_PASSWORD],
         debug_dumps=debug_dumps,
+        institution_id=institution_id,
     )
     coordinator = SchulmanagerCoordinator(hass, client, entry)
 
