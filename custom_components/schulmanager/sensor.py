@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+from html import escape
 from typing import Any, cast
 
 from homeassistant.components.sensor import SensorEntity
@@ -26,6 +27,21 @@ from .util import normalize_student_slug
 
 _LOGGER = logging.getLogger(__name__)
 
+LESSON_TYPE_LABELS: dict[str, str] = {
+    "regularLesson": "Regulär",
+    "cancelledLesson": "Ausfall",
+    "specialLesson": "Sonderstunde",
+    "substitution": "Vertretung",
+    "teacherChange": "Lehrkraftwechsel",
+    "roomChange": "Raumwechsel",
+    "irregularLesson": "Unregelmäßig",
+    "event": "Veranstaltung",
+    "exam": "Prüfung",
+}
+
+HIGHLIGHT_ROW_ATTR = " bgcolor="  # cfe8ff""
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -35,7 +51,9 @@ async def async_setup_entry(
     coord = runtime.get("coordinator")
     client = runtime.get("client")
     if coord is None or client is None:
-        missing = [n for n, v in {"coordinator": coord, "client": client}.items() if v is None]
+        missing = [
+            n for n, v in {"coordinator": coord, "client": client}.items() if v is None
+        ]
         _LOGGER.warning(
             "Runtime data incomplete for entry %s: missing %s; skipping sensor setup",
             entry.entry_id,
@@ -58,14 +76,29 @@ async def async_setup_entry(
         # Add grade sensors for each subject
         # We'll check for available subjects from the first update
         grades_data: dict[str, Any] = (
-            {} if data is None else cast(dict[str, Any], data.get("grades", {}).get(sid, {}))
+            {}
+            if data is None
+            else cast(dict[str, Any], data.get("grades", {}).get(sid, {}))
         )
-        subjects: dict[int, dict[str, Any]] = cast(dict[int, dict[str, Any]], grades_data.get("subjects", {}))
+        subjects: dict[int, dict[str, Any]] = cast(
+            dict[int, dict[str, Any]], grades_data.get("subjects", {})
+        )
 
         for subject_id, subject_data in subjects.items():
             subject_name = subject_data.get("name", f"Fach {subject_id}")
             subject_abbrev = subject_data.get("abbreviation", subject_name)
-            entities.append(GradeSensor(client, coord, sid, name, slug, subject_id, subject_name, subject_abbrev))
+            entities.append(
+                GradeSensor(
+                    client,
+                    coord,
+                    sid,
+                    name,
+                    slug,
+                    subject_id,
+                    subject_name,
+                    subject_abbrev,
+                )
+            )
 
         # Add overall average sensor
         entities.append(OverallGradeSensor(client, coord, sid, name, slug))
@@ -82,7 +115,13 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     _attr_has_entity_name = True
 
     def __init__(
-        self, client: Any, coordinator: SchulmanagerCoordinator, student_id: str, student_name: str, slug: str, day: str
+        self,
+        client: Any,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        slug: str,
+        day: str,
     ) -> None:
         """Initialize a schedule sensor for the given day."""
         super().__init__(coordinator)
@@ -121,7 +160,9 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         integ = cast(IntegrationData | None, self.coordinator.data)
         items: list[dict[str, Any]] = []
         if integ is not None:
-            sched = cast(dict[str, Any], integ.get("schedule", {}).get(self.student_id, {}))
+            sched = cast(
+                dict[str, Any], integ.get("schedule", {}).get(self.student_id, {})
+            )
             items = cast(list[dict[str, Any]], sched.get(self.day, []) or [])
 
         # Check if today/tomorrow is a weekend
@@ -148,111 +189,364 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         integ = cast(IntegrationData | None, self.coordinator.data)
         items: list[dict[str, Any]] = []
         if integ is not None:
-            sched = cast(dict[str, Any], integ.get("schedule", {}).get(self.student_id, {}))
+            sched = cast(
+                dict[str, Any], integ.get("schedule", {}).get(self.student_id, {})
+            )
             items = cast(list[dict[str, Any]], sched.get(self.day, []) or [])
 
-        # Sort items by class hour number to ensure correct order in HTML table
-        def get_hour_number(lesson: dict[str, Any]) -> int:
-            """Extract hour number from lesson, defaulting to 999 for sorting."""
+        def _resolve_hour_str(lesson: dict[str, Any]) -> str:
             class_hour = lesson.get("classHour", {})
             hour = class_hour.get("number")
             if isinstance(hour, int):
-                return hour
-            if isinstance(hour, str) and hour.isdigit():
-                return int(hour)
-            return 999  # Place lessons without hour number at the end
+                return str(hour)
+            if isinstance(hour, str) and hour.strip():
+                return hour.strip()
+            for alt_key in ("hour", "lessonHour", "lessonNumber", "hourNumber"):
+                alt_val = lesson.get(alt_key)
+                if isinstance(alt_val, int):
+                    return str(alt_val)
+                if isinstance(alt_val, str) and alt_val.strip():
+                    return alt_val.strip()
+            return ""
+
+        def get_hour_number(lesson: dict[str, Any]) -> int:
+            """Extract hour number from lesson, defaulting to 999 for sorting."""
+            hour_str = _resolve_hour_str(lesson)
+            if hour_str.isdigit():
+                return int(hour_str)
+            try:
+                return int(float(hour_str.replace(",", ".")))
+            except (ValueError, TypeError):
+                return 999
 
         items_sorted = sorted(items, key=get_hour_number)
 
-        # Structure the raw data properly as JSON
         raw_data: dict[str, Any] = {
             "lessons": [],
             "day": self.day,
             "student_id": self.student_id,
-            "date": self._get_target_date().isoformat() if items else None
+            "date": self._get_target_date().isoformat() if items else None,
         }
 
-        def td(x: str) -> str:
-            return f"<td>{x}</td>"
-
-        rows = []
-        for lesson in items_sorted:
-
-            # Extract data from new structure
-            class_hour = lesson.get("classHour", {})
-            actual_lesson = lesson.get("actualLesson", {})
-            lesson_type = lesson.get("type", "")
-
-            # Get lesson hour number
-            hour = class_hour.get("number", "")
-
-            # Get subject info
-            subject_info = actual_lesson.get("subject", {})
-            subject_name = subject_info.get("name", "")
-            subject_abbr = subject_info.get("abbreviation", "")
-            subject = subject_abbr if subject_abbr else subject_name
-
-            # Get room info
-            room_info = actual_lesson.get("room", {})
-            room = room_info.get("name", "")
-
-            # Get teacher info
-            teachers = actual_lesson.get("teachers", [])
-            teacher_names = []
-            for teacher in teachers:
-                abbr = teacher.get("abbreviation", "")
-                if abbr:
-                    teacher_names.append(abbr)
-                else:
-                    firstname = teacher.get("firstname", "")
-                    lastname = teacher.get("lastname", "")
-                    if firstname and lastname:
-                        teacher_names.append(f"{firstname} {lastname}")
-            teacher = ", ".join(teacher_names) if teacher_names else ""
-
-            # Build info field
-            info_parts = []
-            if lesson_type != "regularLesson":
-                info_parts.append(f"Typ: {lesson_type}")
-            if teacher:
-                info_parts.append(teacher)
-            info = " - ".join(info_parts)
-
-            # Add to raw data structure
-            lesson_data = {
-                "hour": hour,
-                "subject": subject,
-                "subject_full": subject_name,
-                "room": room,
-                "teacher": teacher,
-                "type": lesson_type,
-                "date": lesson.get("date")
-            }
-            raw_data["lessons"].append(lesson_data)
-
-            # Format time as hour number (Stunde)
-            time_display = f"{hour}. Std" if hour else ""
-
-            rows.append(f"<tr>{td(time_display)}{td(subject)}{td(room)}{td(info)}</tr>")
-
-        # Check if weekend day
         if self._is_weekend_day():
             html = (
-                "<table><thead><tr><th>Wochenende</th></tr></thead><tbody>"
+                '<table width="100%"><thead><tr><th>Wochenende</th></tr></thead><tbody>'
                 "<tr><td>Heute ist Wochenende - keine Schule</td></tr>"
                 "</tbody></table>"
             )
-        elif not rows:
+            return {
+                "raw": raw_data,
+                "html": html,
+                "lesson_count": len(raw_data["lessons"]),
+            }
+
+        def _teacher_names(source: dict[str, Any]) -> str:
+            names: list[str] = []
+            teachers = source.get("teachers")
+            if isinstance(teachers, list):
+                for teacher in teachers:
+                    if not isinstance(teacher, dict):
+                        continue
+                    abbr = teacher.get("abbreviation")
+                    if abbr:
+                        names.append(str(abbr))
+                        continue
+                    firstname = teacher.get("firstname")
+                    lastname = teacher.get("lastname")
+                    if firstname and lastname:
+                        names.append(f"{firstname} {lastname}")
+                    elif lastname:
+                        names.append(str(lastname))
+            return ", ".join(names)
+
+        def _extract_core_info(source: dict[str, Any] | None) -> dict[str, str]:
+            if not isinstance(source, dict):
+                return {"subject": "", "subject_full": "", "room": "", "teacher": ""}
+            subject = ""
+            subject_full = ""
+            subject_data = source.get("subject")
+            if isinstance(subject_data, dict):
+                subject = (
+                    subject_data.get("abbreviation")
+                    or subject_data.get("shortName")
+                    or ""
+                )
+                subject_full = (
+                    subject_data.get("name") or subject_data.get("longName") or subject
+                )
+            elif isinstance(subject_data, str):
+                subject = subject_full = subject_data
+            else:
+                subject = (
+                    source.get("subjectShort")
+                    or source.get("subject_name")
+                    or source.get("subject")
+                    or ""
+                )
+                subject_full = (
+                    source.get("subjectLong") or source.get("subjectFull") or subject
+                )
+            room_data = source.get("room")
+            if isinstance(room_data, dict):
+                room = (
+                    room_data.get("name")
+                    or room_data.get("shortName")
+                    or room_data.get("abbreviation")
+                    or ""
+                )
+            elif isinstance(room_data, str):
+                room = room_data
+            else:
+                room = ""
+            teacher = _teacher_names(source)
+            return {
+                "subject": subject,
+                "subject_full": subject_full,
+                "room": room,
+                "teacher": teacher,
+            }
+
+        def _extract_primary_info(lesson: dict[str, Any]) -> dict[str, str]:
+            candidates = [
+                lesson.get("actualLesson"),
+                lesson.get("lesson"),
+                lesson,
+            ]
+            for candidate in candidates:
+                info = _extract_core_info(candidate)
+                if any(info.values()):
+                    return info
+            return {"subject": "", "subject_full": "", "room": "", "teacher": ""}
+
+        def _extract_original_info(lesson: dict[str, Any]) -> dict[str, str]:
+            candidates: list[dict[str, Any] | None] = []
+            original = lesson.get("originalLesson")
+            if isinstance(original, dict):
+                candidates.append(original)
+            original_list = lesson.get("originalLessons")
+            if isinstance(original_list, list):
+                for entry in original_list:
+                    if isinstance(entry, dict):
+                        candidates.append(entry)
+            candidates.append(lesson.get("lesson"))
+            for candidate in candidates:
+                info = _extract_core_info(candidate)
+                if any(info.values()):
+                    return info
+            return {"subject": "", "subject_full": "", "room": "", "teacher": ""}
+
+        def _build_info_text(lesson: dict[str, Any], teacher_text: str) -> str:
+            info_parts: list[str] = []
+            if teacher_text:
+                info_parts.append(teacher_text)
+            extra_parts: list[str] = []
+            for key in ("substitutionText", "comment", "note", "informationText"):
+                value = lesson.get(key)
+                if isinstance(value, str) and value.strip():
+                    extra_parts.append(value.strip())
+            if extra_parts:
+                info_parts.append(" / ".join(extra_parts))
+            return " - ".join(info_parts)
+
+        def _hour_display(lesson: dict[str, Any]) -> tuple[str, str]:
+            hour_str = _resolve_hour_str(lesson)
+            label = f"{hour_str}. Std" if hour_str else ""
+            return hour_str, label
+
+        blocks: list[dict[str, Any]] = []
+        block_lists: dict[str, list[dict[str, Any]]] = {}
+
+        def _acquire_block(lesson: dict[str, Any], lesson_type: str) -> dict[str, Any]:
+            hour_value, hour_label = _hour_display(lesson)
+            if not hour_value:
+                originals = []
+                original_single = lesson.get("originalLesson")
+                if isinstance(original_single, dict):
+                    originals.append(original_single)
+                original_list = lesson.get("originalLessons")
+                if isinstance(original_list, list):
+                    originals.extend(o for o in original_list if isinstance(o, dict))
+                for original in originals:
+                    hour_value = _resolve_hour_str(original)
+                    if hour_value:
+                        hour_label = f"{hour_value}. Std"
+                        break
+            class_hour = lesson.get("classHour", {})
+            date_key = (
+                lesson.get("date") or lesson.get("day") or lesson.get("start") or ""
+            )[:10]
+            class_hour_id = class_hour.get("id")
+            hour_key = hour_value or (
+                str(class_hour_id) if class_hour_id is not None else ""
+            )
+            if not hour_key:
+                linked_lesson = lesson.get("lesson")
+                if isinstance(linked_lesson, dict):
+                    candidate = linked_lesson.get("id") or linked_lesson.get("lessonId")
+                    if candidate:
+                        hour_key = str(candidate)
+                if not hour_key:
+                    for candidate_key in ("id", "lessonId", "lessonID", "lesson_id"):
+                        candidate_val = lesson.get(candidate_key)
+                        if candidate_val:
+                            hour_key = str(candidate_val)
+                            break
+            if not hour_key:
+                hour_key = f"fallback-{len(blocks)}"
+            key = f"{date_key}|{hour_key}"
+            block_list = block_lists.setdefault(key, [])
+            if lesson_type == "cancelledLesson":
+                for block in block_list:
+                    if block.get("secondary") is None:
+                        block.setdefault("hour_display", hour_label)
+                        block.setdefault("hour_value", hour_value)
+                        return block
+            else:
+                for block in block_list:
+                    if block.get("primary") is None:
+                        block.setdefault("hour_display", hour_label)
+                        block.setdefault("hour_value", hour_value)
+                        return block
+            block = {
+                "hour_display": hour_label,
+                "hour_value": hour_value,
+                "primary": None,
+                "secondary": None,
+                "has_change": False,
+            }
+            blocks.append(block)
+            block_list.append(block)
+            return block
+
+        for lesson in items_sorted:
+            lesson_type = lesson.get("type", "regularLesson")
+            primary_info = _extract_primary_info(lesson)
+            original_info = _extract_original_info(lesson)
+            hour_value, _ = _hour_display(lesson)
+            lesson_entry = {
+                "hour": hour_value,
+                "subject": primary_info["subject"],
+                "subject_full": primary_info["subject_full"],
+                "room": primary_info["room"],
+                "teacher": primary_info["teacher"],
+                "type": lesson_type,
+                "date": lesson.get("date"),
+            }
+            if any(original_info.values()):
+                lesson_entry["original"] = original_info
+            raw_data["lessons"].append(lesson_entry)
+
+            block = _acquire_block(lesson, lesson_type)
+            if lesson_type == "cancelledLesson":
+                block["has_change"] = True
+                block.setdefault("cancel_lesson", lesson)
+                info_for_cancel = (
+                    original_info if any(original_info.values()) else primary_info
+                )
+                block["secondary"] = {
+                    "subject": info_for_cancel["subject"],
+                    "room": info_for_cancel["room"],
+                    "info": info_for_cancel["teacher"],
+                    "strike": True,
+                }
+                block.setdefault(
+                    "cancel_type_label",
+                    LESSON_TYPE_LABELS.get(lesson_type, lesson_type),
+                )
+            else:
+                info_text = _build_info_text(lesson, primary_info["teacher"])
+                block["primary"] = {
+                    "subject": primary_info["subject"],
+                    "room": primary_info["room"],
+                    "info": info_text,
+                    "lesson_type": lesson_type,
+                    "highlight": lesson_type != "regularLesson",
+                }
+                if lesson_type != "regularLesson":
+                    block["has_change"] = True
+
+        rows: list[str] = []
+
+        def _format_cell(value: str, *, strike: bool = False) -> str:
+            if value:
+                content = escape(value)
+                if strike:
+                    content = f"<i><s>{content}</s></i>"
+            else:
+                content = "&nbsp;"
+            return f"<td>{content}</td>"
+
+        for block in blocks:
+            primary = block.get("primary")
+            secondary = block.get("secondary")
+            if primary is None:
+                cancel_lesson = block.get("cancel_lesson", {})
+                cancel_label = block.get("cancel_type_label", "Ausfall")
+                teacher_text = ""
+                if isinstance(cancel_lesson, dict):
+                    teacher_text = _extract_original_info(cancel_lesson).get(
+                        "teacher", ""
+                    )
+                info_text = (
+                    _build_info_text(cancel_lesson, teacher_text)
+                    if isinstance(cancel_lesson, dict)
+                    else ""
+                )
+                primary = {
+                    "subject": cancel_label,
+                    "room": "",
+                    "info": info_text,
+                    "highlight": True,
+                }
+                block["has_change"] = True
+                block["primary"] = primary
+            else:
+                highlight = (
+                    block.get("has_change")
+                    or primary.get("lesson_type") != "regularLesson"
+                )
+                primary["highlight"] = bool(highlight)
+                primary.pop("lesson_type", None)
+            if secondary is None:
+                secondary = {"subject": "", "room": "", "info": "", "strike": False}
+                block["secondary"] = secondary
+
+            hour_label = block.get("hour_display") or ""
+            hour_markup = (
+                f"<strong>{escape(hour_label)}</strong>" if hour_label else "&nbsp;"
+            )
+            row_attr = HIGHLIGHT_ROW_ATTR if primary.get("highlight") else ""
+            hour_cell = f'<td rowspan="2" valign="top">{hour_markup}</td>'
+            rows.append(
+                (
+                    f"<tr{row_attr}>{hour_cell}"
+                    f"{_format_cell(primary.get('subject', ''))}"
+                    f"{_format_cell(primary.get('room', ''))}"
+                    f"{_format_cell(primary.get('info', ''))}"
+                    "</tr>"
+                )
+            )
+            rows.append(
+                (
+                    f"<tr{row_attr}>"
+                    f"{_format_cell(secondary.get('subject', ''), strike=secondary.get('strike', False))}"
+                    f"{_format_cell(secondary.get('room', ''), strike=secondary.get('strike', False))}"
+                    f"{_format_cell(secondary.get('info', ''), strike=secondary.get('strike', False))}"
+                    "</tr>"
+                )
+            )
+
+        if not rows:
             html = (
-                "<table><thead><tr><th>Schulfrei</th></tr></thead><tbody>"
+                '<table width="100%"><thead><tr><th>Schulfrei</th></tr></thead><tbody>'
                 "<tr><td>Heute ist schulfrei</td></tr>"
                 "</tbody></table>"
             )
         else:
             html = (
-                "<table><thead><tr><th>Stunde</th><th>Fach</th><th>Raum</th><th>Info</th></tr></thead><tbody>"
-                + "".join(rows)
-                + "</tbody></table>"
+                '<table width="100%"><thead><tr>'
+                "<th align=\"left\">Stunde</th><th align=\"left\">Fach</th><th align=\"left\">Raum</th><th align=\"left\">Info</th>"
+                "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
             )
 
         return {
@@ -264,7 +558,7 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     def _is_weekend_day(self) -> bool:
         """Check if the target day is a weekend."""
         target_date = self._get_target_date()
-        return target_date.weekday() >= 5  # Saturday (5) or Sunday (6)
+        return target_date.weekday() >= 5
 
     def _get_target_date(self) -> datetime:
         """Get the date for the current day (today/tomorrow)."""
@@ -282,7 +576,12 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
     _attr_has_entity_name = True
 
     def __init__(
-        self, client: Any, coordinator: SchulmanagerCoordinator, student_id: str, student_name: str, slug: str
+        self,
+        client: Any,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        slug: str,
     ) -> None:
         """Initialize the schedule changes sensor."""
         super().__init__(coordinator)
@@ -317,7 +616,9 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
         integ = cast(IntegrationData | None, self.coordinator.data)
         changes: dict[str, Any] = {}
         if integ is not None:
-            sched = cast(dict[str, Any], integ.get("schedule", {}).get(self.student_id, {}))
+            sched = cast(
+                dict[str, Any], integ.get("schedule", {}).get(self.student_id, {})
+            )
             changes = cast(dict[str, Any], sched.get("changes", {}) or {})
 
         today_changes = len(changes.get("today", []))
@@ -330,7 +631,9 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
         integ = cast(IntegrationData | None, self.coordinator.data)
         changes: dict[str, Any] = {}
         if integ is not None:
-            sched = cast(dict[str, Any], integ.get("schedule", {}).get(self.student_id, {}))
+            sched = cast(
+                dict[str, Any], integ.get("schedule", {}).get(self.student_id, {})
+            )
             changes = cast(dict[str, Any], sched.get("changes", {}) or {})
 
         if not changes:
@@ -338,15 +641,15 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
                 "changes": {
                     "today": [],
                     "tomorrow": [],
-                    "summary": "Keine Stundenplanänderungen erkannt"
+                    "summary": "Keine Stundenplanänderungen erkannt",
                 },
                 "llm_structured_data": {
                     "has_changes": False,
                     "total_changes": 0,
                     "today_count": 0,
                     "tomorrow_count": 0,
-                    "natural_language_summary": "Keine Stundenplanänderungen für heute und morgen erkannt."
-                }
+                    "natural_language_summary": "Keine Stundenplanänderungen für heute und morgen erkannt.",
+                },
             }
 
         today_changes = changes.get("today", [])
@@ -365,7 +668,10 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
         }
 
         # Add detailed changes for LLM processing
-        for day_name, day_changes in [("today", today_changes), ("tomorrow", tomorrow_changes)]:
+        for day_name, day_changes in [
+            ("today", today_changes),
+            ("tomorrow", tomorrow_changes),
+        ]:
             for change in day_changes:
                 detail = {
                     "day": day_name,
@@ -376,14 +682,14 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
                     "room": change.get("new_room", ""),
                     "reason": change.get("reason", ""),
                     "note": change.get("note", ""),
-                    "date": change.get("date", "")
+                    "date": change.get("date", ""),
                 }
                 detailed_changes.append(detail)
 
         return {
             "changes": changes,
             "llm_structured_data": llm_data,
-            "last_updated": datetime.now().isoformat()
+            "last_updated": datetime.now().isoformat(),
         }
 
 
@@ -395,7 +701,15 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     _attr_suggested_display_precision = 2
 
     def __init__(
-        self, client: Any, coordinator: SchulmanagerCoordinator, student_id: str, student_name: str, slug: str, subject_id: int, subject_name: str, subject_abbrev: str
+        self,
+        client: Any,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        slug: str,
+        subject_id: int,
+        subject_name: str,
+        subject_abbrev: str,
     ) -> None:
         """Initialize the grade sensor."""
         super().__init__(coordinator)
@@ -406,7 +720,9 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         self.subject_name = subject_name
         self.subject_abbrev = subject_abbrev
         # Stable unique ID based on immutable student and subject IDs
-        self._attr_unique_id = f"schulmanager_{self.student_id}_grades_{self.subject_id!s}"
+        self._attr_unique_id = (
+            f"schulmanager_{self.student_id}_grades_{self.subject_id!s}"
+        )
 
         # Keep dynamic name since it includes subject abbreviation
         self._attr_name = f"Noten {subject_abbrev}"
@@ -467,7 +783,9 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         """Return the average grade for this subject (if available)."""
         integ = cast(IntegrationData | None, self.coordinator.data)
         grades_data: dict[str, Any] = (
-            {} if integ is None else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
+            {}
+            if integ is None
+            else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
         )
         subjects: dict[int, Any] = grades_data.get("subjects", {})
         subject_data = subjects.get(self.subject_id, {})
@@ -489,7 +807,9 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         """Return the detailed grade information by category."""
         integ = cast(IntegrationData | None, self.coordinator.data)
         grades_data: dict[str, Any] = (
-            {} if integ is None else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
+            {}
+            if integ is None
+            else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
         )
         subjects: dict[int, Any] = grades_data.get("subjects", {})
         subject_data = subjects.get(self.subject_id, {})
@@ -529,7 +849,7 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
             if processed_grades:
                 category_summary[category] = {
                     "count": len(processed_grades),
-                    "grades": processed_grades
+                    "grades": processed_grades,
                 }
                 total_grades += len(processed_grades)
 
@@ -550,7 +870,7 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
                 "average": round(sum(all_grade_values) / len(all_grade_values), 2),
                 "best_grade": min(all_grade_values),  # In German system, 1 is best
                 "worst_grade": max(all_grade_values),
-                "total_numeric_grades": len(all_grade_values)
+                "total_numeric_grades": len(all_grade_values),
             }
 
         # Build human-readable summaries (plain text and Markdown)
@@ -590,8 +910,12 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
                 lines_text.append(f"  - {line}")
                 lines_md.append(f"  - {line}")
 
-        grades_summary = "\n".join(lines_text) if lines_text else "Keine Noten verfügbar"
-        grades_summary_md = "\n".join(lines_md) if lines_md else "_Keine Noten verfügbar_"
+        grades_summary = (
+            "\n".join(lines_text) if lines_text else "Keine Noten verfügbar"
+        )
+        grades_summary_md = (
+            "\n".join(lines_md) if lines_md else "_Keine Noten verfügbar_"
+        )
 
         return {
             "subject_name": self.subject_name,
@@ -613,7 +937,12 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
     _attr_suggested_display_precision = 2
 
     def __init__(
-        self, client: Any, coordinator: Any, student_id: str, student_name: str, slug: str
+        self,
+        client: Any,
+        coordinator: Any,
+        student_id: str,
+        student_name: str,
+        slug: str,
     ) -> None:
         """Initialize the overall grade sensor."""
         super().__init__(coordinator)
@@ -682,7 +1011,9 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
         """Return the overall average grade for this student."""
         integ = cast(IntegrationData | None, self.coordinator.data)
         grades_data: dict[str, Any] = (
-            {} if integ is None else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
+            {}
+            if integ is None
+            else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
         )
 
         overall_average = grades_data.get("overall_average")
@@ -700,7 +1031,9 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
         """Return the overall grade statistics."""
         integ = cast(IntegrationData | None, self.coordinator.data)
         grades_data: dict[str, Any] = (
-            {} if integ is None else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
+            {}
+            if integ is None
+            else cast(dict[str, Any], integ.get("grades", {}).get(self.student_id, {}))
         )
 
         if not grades_data:
@@ -744,10 +1077,16 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
                 txt += f": {avg}"
             txt += f" – {count} Noten"
             lines_text.append(txt)
-            lines_md.append(f"- **{name}** ({abbr}): {avg if avg is not None else '-'} – {count} Noten")
+            lines_md.append(
+                f"- **{name}** ({abbr}): {avg if avg is not None else '-'} – {count} Noten"
+            )
 
-        grades_summary = "\n".join(lines_text) if lines_text else "Keine Noten verfügbar"
-        grades_summary_md = "\n".join(lines_md) if lines_md else "_Keine Noten verfügbar_"
+        grades_summary = (
+            "\n".join(lines_text) if lines_text else "Keine Noten verfügbar"
+        )
+        grades_summary_md = (
+            "\n".join(lines_md) if lines_md else "_Keine Noten verfügbar_"
+        )
 
         return {
             "total_subjects": grades_data.get("total_subjects", 0),
@@ -767,7 +1106,12 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
     _attr_state_class = None
 
     def __init__(
-        self, client: Any, coordinator: SchulmanagerCoordinator, student_id: str, student_name: str, slug: str
+        self,
+        client: Any,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        slug: str,
     ) -> None:
         """Initialize the next exam countdown sensor."""
         super().__init__(coordinator)
@@ -802,7 +1146,14 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
     def native_value(self) -> StateType:
         """Return days until next exam."""
         integ = cast(IntegrationData | None, self.coordinator.data)
-        items: list[dict[str, Any]] = [] if integ is None else cast(list[dict[str, Any]], integ.get("exams", {}).get(self.student_id, []) or [])
+        items: list[dict[str, Any]] = (
+            []
+            if integ is None
+            else cast(
+                list[dict[str, Any]],
+                integ.get("exams", {}).get(self.student_id, []) or [],
+            )
+        )
         if not items:
             return None
 
@@ -847,12 +1198,19 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return additional exam information."""
         integ = cast(IntegrationData | None, self.coordinator.data)
-        items: list[dict[str, Any]] = [] if integ is None else cast(list[dict[str, Any]], integ.get("exams", {}).get(self.student_id, []) or [])
+        items: list[dict[str, Any]] = (
+            []
+            if integ is None
+            else cast(
+                list[dict[str, Any]],
+                integ.get("exams", {}).get(self.student_id, []) or [],
+            )
+        )
         if not items:
             return {
                 "next_exam": None,
                 "total_upcoming_exams": 0,
-                "last_updated": datetime.now().isoformat()
+                "last_updated": datetime.now().isoformat(),
             }
 
         # Get current date
@@ -881,10 +1239,12 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
                     exam_info = {
                         "date": exam_date_obj.isoformat(),
                         "days_from_now": (exam_date_obj - now).days,
-                        "subject": exam.get("subject", {}).get("name", "Unbekanntes Fach"),
+                        "subject": exam.get("subject", {}).get(
+                            "name", "Unbekanntes Fach"
+                        ),
                         "subject_abbr": exam.get("subject", {}).get("abbreviation", ""),
                         "type": exam.get("type", {}).get("name", "Prüfung"),
-                        "comment": exam.get("comment", "")
+                        "comment": exam.get("comment", ""),
                     }
                     upcoming_exams.append(exam_info)
 
@@ -900,10 +1260,14 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
                         exam_info = {
                             "date": exam_date_obj.isoformat(),
                             "days_from_now": (exam_date_obj - now).days,
-                            "subject": exam.get("subject", {}).get("name", "Unbekanntes Fach"),
-                            "subject_abbr": exam.get("subject", {}).get("abbreviation", ""),
+                            "subject": exam.get("subject", {}).get(
+                                "name", "Unbekanntes Fach"
+                            ),
+                            "subject_abbr": exam.get("subject", {}).get(
+                                "abbreviation", ""
+                            ),
                             "type": exam.get("type", {}).get("name", "Prüfung"),
-                            "comment": exam.get("comment", "")
+                            "comment": exam.get("comment", ""),
                         }
                         upcoming_exams.append(exam_info)
 
@@ -920,5 +1284,5 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
             "next_exam": next_exam,
             "total_upcoming_exams": len(upcoming_exams),
             "upcoming_exams": upcoming_exams[:5],  # Show next 5 exams
-            "last_updated": datetime.now().isoformat()
+            "last_updated": datetime.now().isoformat(),
         }
