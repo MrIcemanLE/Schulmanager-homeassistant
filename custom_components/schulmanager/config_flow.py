@@ -52,6 +52,13 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
     MINOR_VERSION = 1
 
+    def __init__(self) -> None:
+        """Initialize the config flow."""
+        super().__init__()
+        self._username: str | None = None
+        self._password: str | None = None
+        self._multiple_accounts: list[dict[str, Any]] | None = None
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -73,6 +80,19 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
 
             # Test login and get student data
             await hub.async_login()
+
+            # Check if multi-school selection is needed
+            multiple_accounts = hub.get_multiple_accounts()
+            if multiple_accounts:
+                _LOGGER.info(
+                    "Multi-school account detected with %d schools",
+                    len(multiple_accounts),
+                )
+                # Store credentials and school list for next step
+                self._username = user_input[CONF_USERNAME]
+                self._password = user_input[CONF_PASSWORD]
+                self._multiple_accounts = multiple_accounts
+                return await self.async_step_select_school()
 
             students = hub.get_students()
             if not students:
@@ -120,6 +140,93 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
             options=DEFAULT_OPTIONS.copy(),
         )
 
+    async def async_step_select_school(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle school selection for multi-school accounts."""
+        errors = {}
+
+        if user_input is None:
+            # Build selection schema from available schools
+            if not self._multiple_accounts:
+                return self.async_abort(reason="no_schools")
+
+            school_options = {
+                str(school["id"]): school["label"]
+                for school in self._multiple_accounts
+            }
+
+            return self.async_show_form(
+                step_id="select_school",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required("institution_id"): vol.In(school_options),
+                    }
+                ),
+                description_placeholders={
+                    "num_schools": str(len(self._multiple_accounts))
+                },
+            )
+
+        # User selected a school, now login with that institutionId
+        selected_id = int(user_input["institution_id"])
+
+        try:
+            hub = SchulmanagerClient(
+                self.hass,
+                self._username,
+                self._password,
+                debug_dumps=True,
+                institution_id=selected_id,
+            )
+
+            # Login again with selected school
+            await hub.async_login()
+
+            students = hub.get_students()
+            if not students:
+                errors["base"] = "no_students"
+            else:
+                _LOGGER.info(
+                    "Found %s students: %s",
+                    len(students),
+                    [s["name"] for s in students],
+                )
+
+        except Exception as err:
+            _LOGGER.exception("Failed to connect with selected school")
+            errors["base"] = "cannot_connect"
+
+        if errors:
+            # Rebuild school selection form
+            school_options = {
+                str(school["id"]): school["label"]
+                for school in self._multiple_accounts
+            }
+            return self.async_show_form(
+                step_id="select_school",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required("institution_id"): vol.In(school_options),
+                    }
+                ),
+                errors=errors,
+            )
+
+        # Success - create entry
+        await self.async_set_unique_id(self._username.lower())
+        self._abort_if_unique_id_configured()
+
+        return self.async_create_entry(
+            title="Schulmanager Online",
+            data={
+                CONF_USERNAME: self._username,
+                CONF_PASSWORD: self._password,
+                "institution_id": selected_id,
+            },
+            options=DEFAULT_OPTIONS.copy(),
+        )
+
     # Reauthentication support
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Start reauthentication step for updating credentials."""
@@ -149,11 +256,17 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Validate new credentials
         try:
+            # Get existing institutionId if available
+            institution_id = None
+            if hasattr(self, "_reauth_entry") and self._reauth_entry:
+                institution_id = self._reauth_entry.data.get("institution_id")
+
             hub = SchulmanagerClient(
                 self.hass,
                 user_input[CONF_USERNAME],
                 user_input[CONF_PASSWORD],
                 debug_dumps=False,
+                institution_id=institution_id,
             )
             await hub.async_login()
         except Exception:  # noqa: BLE001 - config flows intentionally swallow unknown errors to prompt retry
@@ -171,12 +284,18 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Update the existing entry with new credentials
         assert hasattr(self, "_reauth_entry") and self._reauth_entry is not None
+
+        # Preserve institutionId if it exists
+        update_data = {
+            CONF_USERNAME: user_input[CONF_USERNAME],
+            CONF_PASSWORD: user_input[CONF_PASSWORD],
+        }
+        if institution_id is not None:
+            update_data["institution_id"] = institution_id
+
         self.hass.config_entries.async_update_entry(
             self._reauth_entry,
-            data={
-                CONF_USERNAME: user_input[CONF_USERNAME],
-                CONF_PASSWORD: user_input[CONF_PASSWORD],
-            },
+            data=update_data,
         )
         await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
         return self.async_abort(reason="reauth_successful")

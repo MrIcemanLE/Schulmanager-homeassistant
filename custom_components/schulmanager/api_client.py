@@ -55,6 +55,7 @@ class SchulmanagerClient:
         self.debug_dumps = debug_dumps
         self.data: dict[str, Any] | None = None
         self._institution_id: int | None = institution_id
+        self._multiple_accounts: list[dict[str, Any]] | None = None
 
     async def _dump(self, name: str, data: Any) -> None:
         """Save debug data to file if debug dumps are enabled."""
@@ -118,6 +119,10 @@ class SchulmanagerClient:
     def get_institution_id(self) -> int | None:
         """Return the institution ID if available."""
         return self._institution_id
+
+    def get_multiple_accounts(self) -> list[dict[str, Any]] | None:
+        """Return multiple accounts if available from login response."""
+        return getattr(self, "_multiple_accounts", None)
 
     async def _fetch_salt(self, email: str) -> str:
         """Fetch salt for password hashing."""
@@ -204,8 +209,22 @@ class SchulmanagerClient:
                 {"status": resp.status, "data": sanitize_for_log(data)},
             )
 
-            if resp.status != 200 or "jwt" not in data:
+            if resp.status != 200:
                 raise RuntimeError(f"login_failed:{resp.status}")
+
+            # Check for multi-school accounts
+            if "multipleAccounts" in data:
+                self._multiple_accounts = data["multipleAccounts"]
+                _LOGGER.debug(
+                    "Multi-school account detected with %d schools",
+                    len(self._multiple_accounts),
+                )
+                # Store but don't fail - caller must handle school selection
+                return
+
+            # Normal single-school login
+            if "jwt" not in data:
+                raise RuntimeError(f"login_failed:no_jwt:{resp.status}")
 
             self._token = data["jwt"]
             user = data.get("user") or {}
