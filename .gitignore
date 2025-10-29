@@ -43,3 +43,8 @@ Thumbs.db
 # Home Assistant specific
 home-assistant.log
 home-assistant_v2.db*
+
+# Internal development files (never commit)
+TODO.md
+INTERNAL_*.md
+*.internal.md
