@@ -15,7 +15,7 @@ from homeassistant.helpers.device_registry import (
     async_get as async_get_device_registry,
 )
 
-from .api_client import SchulmanagerClient
+from .api_client import MultiSchoolClient, SchulmanagerClient
 from .const import (
     CONF_PASSWORD,
     CONF_USERNAME,
@@ -38,6 +38,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate old config entry versions.
 
     - v1 -> v2: remove deprecated polling options (auto_update_interval, poll_interval)
+    - v2 -> v3: convert institution_id to schools array (multi-school support)
     """
     version = entry.version
 
@@ -58,6 +59,53 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.config_entries.async_update_entry(entry, options=options)
 
         entry.version = 2
+
+    if version < 3:
+        # Migration v2 -> v3: Convert institution_id to schools array
+        data = dict(entry.data)
+        institution_id = data.get("institution_id")
+
+        if institution_id and "schools" not in data:
+            _LOGGER.info(
+                "Migrating config entry %s from v2 to v3: Converting institution_id to schools array",
+                entry.entry_id,
+            )
+
+            # Try to fetch school name from API
+            try:
+                client = SchulmanagerClient(
+                    hass,
+                    data[CONF_USERNAME],
+                    data[CONF_PASSWORD],
+                    debug_dumps=False,
+                    institution_id=institution_id,
+                )
+                await client.async_login()
+
+                # Use the institution_id to create a schools entry
+                # School name might not be available, use placeholder
+                schools = [
+                    {
+                        "id": institution_id,
+                        "label": f"School {institution_id}",  # Placeholder
+                    }
+                ]
+
+                data["schools"] = schools
+                data.pop("institution_id", None)  # Remove old key
+
+                hass.config_entries.async_update_entry(entry, data=data)
+                _LOGGER.info("Migration successful: Created schools array with %d school(s)", len(schools))
+
+            except Exception as err:
+                _LOGGER.warning(
+                    "Migration failed for entry %s, keeping institution_id for now: %s",
+                    entry.entry_id,
+                    err,
+                )
+                # Keep the old institution_id if migration fails - backwards compatibility
+
+        entry.version = 3
         return True
 
     return True
@@ -74,18 +122,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     enable_exams = bool(options.get(OPT_ENABLE_EXAMS, True))
     enable_grades = bool(options.get(OPT_ENABLE_GRADES, True))
 
-    # Get institutionId from entry data (for multi-school support)
-    institution_id = entry.data.get("institution_id")
-    if institution_id is not None:
-        _LOGGER.debug("Using institutionId %s from config entry", institution_id)
+    username = entry.data[CONF_USERNAME]
+    password = entry.data[CONF_PASSWORD]
 
-    client = SchulmanagerClient(
-        hass,
-        entry.data[CONF_USERNAME],
-        entry.data[CONF_PASSWORD],
-        debug_dumps=debug_dumps,
-        institution_id=institution_id,
-    )
+    # Check if multi-school or single-school configuration
+    schools = entry.data.get("schools")
+
+    if schools:
+        # Multi-school configuration
+        _LOGGER.info("Setting up multi-school configuration with %d schools", len(schools))
+
+        client = MultiSchoolClient(
+            hass,
+            username,
+            password,
+            debug_dumps=debug_dumps,
+        )
+
+        await client.async_login_all_schools(schools)
+
+    else:
+        # Single-school configuration (backwards compatibility)
+        institution_id = entry.data.get("institution_id")
+        if institution_id is not None:
+            _LOGGER.debug("Using single-school configuration with institutionId %s", institution_id)
+
+        client = SchulmanagerClient(
+            hass,
+            username,
+            password,
+            debug_dumps=debug_dumps,
+            institution_id=institution_id,
+        )
+
     coordinator = SchulmanagerCoordinator(hass, client, entry)
 
     try:
@@ -112,7 +181,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("Service device created with ID: %s, identifiers: %s", service_device.id, service_device.identifiers)
 
     # Student devices linked to the service
-    for student in client.get_students():
+    # For multi-school clients, get_all_students() returns students with school_id and school_name
+    # For single-school clients, get_students() returns students without school info
+    students = client.get_all_students() if isinstance(client, MultiSchoolClient) else client.get_students()
+
+    for student in students:
         student_device = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, f"student_{student['id']}")},
@@ -139,7 +212,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 add_config_entry_id=entry.entry_id
             )
 
-    _LOGGER.info("Created service device and %d student devices", len(client.get_students()))
+    _LOGGER.info("Created service device and %d student devices", len(students))
 
     # Store runtime data on the entry per guidelines
     entry.runtime_data = {"client": client, "coordinator": coordinator}

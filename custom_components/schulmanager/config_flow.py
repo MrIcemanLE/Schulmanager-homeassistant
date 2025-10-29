@@ -15,7 +15,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.helpers import config_validation as cv
 
-from .api_client import SchulmanagerClient
+from .api_client import MultiSchoolClient, SchulmanagerClient
 from .const import (
     CONF_PASSWORD,
     CONF_USERNAME,
@@ -52,13 +52,6 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
     MINOR_VERSION = 1
 
-    def __init__(self) -> None:
-        """Initialize the config flow."""
-        super().__init__()
-        self._username: str | None = None
-        self._password: str | None = None
-        self._multiple_accounts: list[dict[str, Any]] | None = None
-
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -68,44 +61,96 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is None:
             return self.async_show_form(step_id="user", data_schema=USER_SCHEMA)
 
+        username = user_input[CONF_USERNAME]
+        password = user_input[CONF_PASSWORD]
+
+        # Ensure we don't add duplicates: use username as unique ID
+        await self.async_set_unique_id(username.lower())
+        self._abort_if_unique_id_configured()
+
         # Test the connection and get student data
         try:
             # Enable debug dumps during config flow to help diagnose login issues
             hub = SchulmanagerClient(
                 self.hass,
-                user_input[CONF_USERNAME],
-                user_input[CONF_PASSWORD],
+                username,
+                password,
                 debug_dumps=True,
             )
 
             # Test login and get student data
             await hub.async_login()
 
-            # Check if multi-school selection is needed
+            # Check if multi-school account
             multiple_accounts = hub.get_multiple_accounts()
+
             if multiple_accounts:
+                # Multi-school account: Login to all schools automatically
                 _LOGGER.info(
-                    "Multi-school account detected with %d schools",
+                    "Multi-school account detected with %d schools - logging into all",
                     len(multiple_accounts),
                 )
-                # Store credentials and school list for next step
-                self._username = user_input[CONF_USERNAME]
-                self._password = user_input[CONF_PASSWORD]
-                self._multiple_accounts = multiple_accounts
-                return await self.async_step_select_school()
 
-            students = hub.get_students()
-            if not students:
-                errors["base"] = "no_students"
-            else:
-                _LOGGER.info(
-                    "Found %s students: %s",
-                    len(students),
-                    [s["name"] for s in students],
+                # Create MultiSchoolClient and login to all schools
+                multi_client = MultiSchoolClient(
+                    self.hass,
+                    username,
+                    password,
+                    debug_dumps=True,
                 )
 
-                # Store student data for device creation
-                self._students_data = students
+                await multi_client.async_login_all_schools(multiple_accounts)
+
+                # Get all students from all schools
+                all_students = multi_client.get_all_students()
+
+                if not all_students:
+                    errors["base"] = "no_students"
+                else:
+                    _LOGGER.info(
+                        "Found %d total students across %d schools",
+                        len(all_students),
+                        len(multiple_accounts),
+                    )
+
+                    # Create entry with all schools
+                    return self.async_create_entry(
+                        title="Schulmanager Online",
+                        data={
+                            CONF_USERNAME: username,
+                            CONF_PASSWORD: password,
+                            "schools": multiple_accounts,  # Store all schools
+                        },
+                        options=DEFAULT_OPTIONS.copy(),
+                    )
+
+            else:
+                # Single-school account (normal flow)
+                students = hub.get_students()
+                if not students:
+                    errors["base"] = "no_students"
+                else:
+                    _LOGGER.info(
+                        "Single-school account: Found %s students: %s",
+                        len(students),
+                        [s["name"] for s in students],
+                    )
+
+                    # Store institutionId if available (for backwards compatibility)
+                    institution_id = hub.get_institution_id()
+                    entry_data = {
+                        CONF_USERNAME: username,
+                        CONF_PASSWORD: password,
+                    }
+                    if institution_id is not None:
+                        entry_data["institution_id"] = institution_id
+                        _LOGGER.info("Stored institutionId %s", institution_id)
+
+                    return self.async_create_entry(
+                        title="Schulmanager Online",
+                        data=entry_data,
+                        options=DEFAULT_OPTIONS.copy(),
+                    )
 
         except Exception as err:
             _LOGGER.exception("Failed to connect to Schulmanager")
@@ -120,111 +165,11 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
         if errors:
             return self.async_show_form(step_id="user", data_schema=USER_SCHEMA, errors=errors)
 
-        # Ensure we don't add duplicates: use username as unique ID
-        await self.async_set_unique_id(user_input[CONF_USERNAME].lower())
-        self._abort_if_unique_id_configured()
-
-        # Store institutionId if available (for multi-school support)
-        institution_id = hub.get_institution_id()
-        entry_data = {
-            CONF_USERNAME: user_input[CONF_USERNAME],
-            CONF_PASSWORD: user_input[CONF_PASSWORD],
-        }
-        if institution_id is not None:
-            entry_data["institution_id"] = institution_id
-            _LOGGER.info("Stored institutionId %s for multi-school support", institution_id)
-
-        return self.async_create_entry(
-            title="Schulmanager Online",
-            data=entry_data,
-            options=DEFAULT_OPTIONS.copy(),
-        )
-
-    async def async_step_select_school(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle school selection for multi-school accounts."""
-        errors = {}
-
-        if user_input is None:
-            # Build selection schema from available schools
-            if not self._multiple_accounts:
-                return self.async_abort(reason="no_schools")
-
-            school_options = {
-                str(school["id"]): school["label"]
-                for school in self._multiple_accounts
-            }
-
-            return self.async_show_form(
-                step_id="select_school",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required("institution_id"): vol.In(school_options),
-                    }
-                ),
-                description_placeholders={
-                    "num_schools": str(len(self._multiple_accounts))
-                },
-            )
-
-        # User selected a school, now login with that institutionId
-        selected_id = int(user_input["institution_id"])
-
-        try:
-            hub = SchulmanagerClient(
-                self.hass,
-                self._username,
-                self._password,
-                debug_dumps=True,
-                institution_id=selected_id,
-            )
-
-            # Login again with selected school
-            await hub.async_login()
-
-            students = hub.get_students()
-            if not students:
-                errors["base"] = "no_students"
-            else:
-                _LOGGER.info(
-                    "Found %s students: %s",
-                    len(students),
-                    [s["name"] for s in students],
-                )
-
-        except Exception as err:
-            _LOGGER.exception("Failed to connect with selected school")
-            errors["base"] = "cannot_connect"
-
-        if errors:
-            # Rebuild school selection form
-            school_options = {
-                str(school["id"]): school["label"]
-                for school in self._multiple_accounts
-            }
-            return self.async_show_form(
-                step_id="select_school",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required("institution_id"): vol.In(school_options),
-                    }
-                ),
-                errors=errors,
-            )
-
-        # Success - create entry
-        await self.async_set_unique_id(self._username.lower())
-        self._abort_if_unique_id_configured()
-
-        return self.async_create_entry(
-            title="Schulmanager Online",
-            data={
-                CONF_USERNAME: self._username,
-                CONF_PASSWORD: self._password,
-                "institution_id": selected_id,
-            },
-            options=DEFAULT_OPTIONS.copy(),
+        # Should not reach here, but return error form as fallback
+        return self.async_show_form(
+            step_id="user",
+            data_schema=USER_SCHEMA,
+            errors={"base": "unknown"},
         )
 
     # Reauthentication support
