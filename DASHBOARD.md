@@ -1,6 +1,6 @@
 # 📊 Beispiel-Dashboards (Sections)
 
-Nachfolgend moderne Beispiele auf Basis der neuen Entitäten/Struktur. Passe die Entitätsnamen (Schüler‑IDs/Slugs) an deine Installation an.
+Moderne Dashboard-Beispiele mit der aktuellen Entitätsstruktur. Passe die Schülernamen an deine Installation an.
 
 ## Stundenplan & Arbeiten
 
@@ -10,48 +10,109 @@ sections:
   - type: grid
     cards:
       - type: calendar
-        title: "📅 Max Mustermann Stundenplan"
+        title: "📅 Stundenplan"
         entities:
           - calendar.max_mustermann_stundenplan
       - type: calendar
-        title: "🗓️ Max Mustermann Arbeiten"
+        title: "🗓️ Arbeiten & Klausuren"
         entities:
           - calendar.max_mustermann_arbeiten
 ```
 
-## Änderungen & Hausaufgaben
+## Heutiger Stundenplan
 
 ```yaml
 type: sections
 sections:
   - type: grid
     cards:
+      - type: markdown
+        title: "📚 Stundenplan heute"
+        content: |
+          {{ state_attr('sensor.max_mustermann_schedule_today', 'plain') }}
       - type: entities
         title: "🔔 Änderungen"
         show_header_toggle: false
         entities:
-          - sensor.schulmanager_<schueler_id>_schedule_changes
-      - type: todo-list
-        title: "📝 Hausaufgaben"
-        entity: todo.schulmanager_<schueler_id>_homework
+          - sensor.max_mustermann_schedule_changes
 ```
 
-## Noten Überblick
+## Hausaufgaben & Noten
 
 ```yaml
 type: sections
 sections:
   - type: grid
     cards:
+      - type: todo-list
+        title: "📝 Hausaufgaben"
+        entity: todo.max_mustermann_hausaufgaben
       - type: entities
         title: "🧮 Noten Überblick"
         show_header_toggle: false
         entities:
-          - sensor.schulmanager_<schueler_id>_grades_overall
+          - sensor.max_mustermann_noten_gesamt
+          - sensor.max_mustermann_next_exam_days
 ```
 
-Hinweise
-- Die Kalender‑Titel werden mit Schülernamen erzeugt (z. B. „Max Mustermann Stundenplan“).
-- Der Sensor `schedule_changes` liefert zusätzlich strukturierte Attribute (z. B. `llm_structured_data`) und eine Zusammenfassung.
-- Für den Stundenplan werden Doppeltermine (Ausfall + Ersatz) vermieden: der Ausfall erscheint in der Beschreibung des Ersatztermins.
+## Vollständige Übersicht
 
+```yaml
+type: sections
+sections:
+  - type: grid
+    cards:
+      - type: calendar
+        title: "📅 Stundenplan"
+        entities:
+          - calendar.max_mustermann_stundenplan
+      - type: markdown
+        title: "📚 Heute"
+        content: |
+          {{ state_attr('sensor.max_mustermann_schedule_today', 'plain') }}
+  - type: grid
+    cards:
+      - type: todo-list
+        title: "📝 Hausaufgaben"
+        entity: todo.max_mustermann_hausaufgaben
+      - type: entities
+        title: "🧮 Noten"
+        show_header_toggle: false
+        entities:
+          - sensor.max_mustermann_noten_gesamt
+          - sensor.max_mustermann_noten_mathematik
+          - sensor.max_mustermann_noten_deutsch
+          - sensor.max_mustermann_noten_englisch
+  - type: grid
+    cards:
+      - type: entities
+        title: "🔔 Änderungen & Termine"
+        show_header_toggle: false
+        entities:
+          - sensor.max_mustermann_schedule_changes
+          - sensor.max_mustermann_next_exam_days
+```
+
+## Automation-Beispiel: Tägliche Stundenplan-Benachrichtigung
+
+```yaml
+automation:
+  - alias: "Schulmanager: Stundenplan morgens"
+    trigger:
+      - platform: time
+        at: "07:00:00"
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "Stundenplan heute"
+          message: |
+            {{ state_attr('sensor.max_mustermann_schedule_today', 'plain') }}
+```
+
+## Hinweise
+
+- **Entity-Namen**: Werden automatisch aus dem Schülernamen generiert (z.B. `max_mustermann`)
+- **plain-Attribut**: Stundenplan-Sensoren haben ein `plain`-Attribut mit lesbarer Text-Version (perfekt für Benachrichtigungen und Sprachausgabe)
+- **Emoji-Logik**: ❌ Entfall, 🔁 Vertretung, 🚪 Raumwechsel, 📝 Prüfung
+- **Multi-School**: Bei mehreren Schulen erhält jeder Schüler einen `sensor.<name>_schule` zur Identifikation
+- **Noten-Sensoren**: Werden pro Fach erstellt (z.B. `sensor.max_mustermann_noten_mathematik`)
