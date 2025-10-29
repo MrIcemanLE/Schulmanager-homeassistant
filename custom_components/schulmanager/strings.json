@@ -20,6 +20,9 @@
       },
       "next_exam_days": {
         "name": "Days until next exam"
+      },
+      "school": {
+        "name": "School"
       }
     },
     "todo": {
@@ -46,13 +49,6 @@
           "password": "Password"
         }
       },
-      "select_school": {
-        "title": "Select School",
-        "description": "Your account has access to multiple schools. Please select which school to connect.",
-        "data": {
-          "institution_id": "School"
-        }
-      },
       "reauth_confirm": {
         "title": "Reauthenticate Schulmanager",
         "description": "Please re-enter your credentials to restore access.",
@@ -70,8 +66,7 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
-      "reauth_successful": "Reauthentication was successful",
-      "no_schools": "No schools available for selection"
+      "reauth_successful": "Reauthentication was successful"
     }
   },
   "exceptions": {

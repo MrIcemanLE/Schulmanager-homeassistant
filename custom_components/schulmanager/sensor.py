@@ -17,10 +17,11 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, OPT_SCHEDULE_HIGHLIGHT
 from .coordinator import SchulmanagerCoordinator
 from .types import IntegrationData
 from .util import normalize_student_slug
@@ -105,6 +106,12 @@ async def async_setup_entry(
 
         # Add days until next exam sensor
         entities.append(NextExamCountdownSensor(client, coord, sid, name, slug))
+
+        # Add school diagnostic sensor (shows which school the student belongs to)
+        # Only relevant for multi-school accounts, but added for all students
+        school_name = st.get("school_name")  # May be None for single-school accounts
+        school_id = st.get("school_id")  # May be None for single-school accounts
+        entities.append(SchoolDiagnosticSensor(coord, sid, name, slug, school_name, school_id))
 
     async_add_entities(entities)
 
@@ -549,9 +556,13 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
                 "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
             )
 
+        # Generate plain text format for notifications (with emoji highlighting)
+        plain_text = self._generate_plain_text(items_sorted)
+
         return {
             "raw": raw_data,
             "html": html,
+            "plain": plain_text,
             "lesson_count": len(raw_data["lessons"]),
         }
 
@@ -568,6 +579,112 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         if self.day == "tomorrow":
             return now + timedelta(days=1)
         return now
+
+    def _generate_plain_text(self, lessons: list[dict[str, Any]]) -> str:
+        """Generate plain text schedule with emoji highlighting for notifications.
+
+        Format: "1. Std: 🔁 Mathematik – Raum 204 (Vertretung)"
+        Uses same emoji logic as calendar.
+        """
+        if not lessons:
+            if self._is_weekend_day():
+                return "Wochenende - keine Schule"
+            return "Schulfrei"
+
+        # Get highlight option from config entry
+        highlight = False
+        if self.coordinator.config_entry:
+            opts = dict(self.coordinator.config_entry.options or {})
+            highlight = bool(opts.get(OPT_SCHEDULE_HIGHLIGHT, True))
+
+        lines: list[str] = []
+
+        for lesson in lessons:
+            lesson_type = lesson.get("type", "regularLesson")
+            actual = lesson.get("actualLesson", {}) or {}
+
+            # Get hour number
+            hour_str = ""
+            class_hour = lesson.get("classHour", {})
+            hour_num = class_hour.get("number")
+            if isinstance(hour_num, int):
+                hour_str = f"{hour_num}. Std"
+            elif isinstance(hour_num, str) and hour_num.strip():
+                hour_str = f"{hour_num}. Std"
+
+            # Get subject
+            subject = ""
+            if actual.get("subject"):
+                subj_data = actual["subject"]
+                subject = subj_data.get("abbreviation") or subj_data.get("name") or ""
+            if not subject and lesson.get("subject"):
+                subj_data = lesson["subject"]
+                subject = subj_data.get("abbreviation") or subj_data.get("name") or ""
+            if not subject:
+                subject = "Unterricht"
+
+            # Get room
+            room = ""
+            if actual.get("room"):
+                room = actual["room"].get("name", "")
+            elif lesson.get("room"):
+                room = lesson["room"].get("name", "")
+
+            # Emoji highlighting (same logic as calendar.py)
+            emoji = ""
+            if highlight:
+                if lesson_type == "cancelledLesson":
+                    emoji = "❌ "
+                elif lesson_type in {"substitution", "specialLesson", "teacherChange", "irregularLesson"}:
+                    emoji = "🔁 "
+                elif lesson_type == "roomChange":
+                    emoji = "🚪 "
+                elif lesson_type == "exam":
+                    emoji = "📝 "
+            elif lesson_type == "cancelledLesson":
+                # Without highlight: simple X marker for cancellations
+                emoji = "X "
+
+            # Build line
+            line_parts = [hour_str] if hour_str else []
+
+            # Subject with emoji
+            subject_part = f"{emoji}{subject}"
+            if room:
+                subject_part += f" – {room}"
+            line_parts.append(subject_part)
+
+            # Additional info (teacher, reason)
+            info_parts: list[str] = []
+
+            # Teacher
+            teachers = actual.get("teachers") or lesson.get("teachers") or []
+            if teachers:
+                teacher_abbr = ", ".join(
+                    t.get("abbreviation") or f"{t.get('firstname', '')} {t.get('lastname', '')}".strip()
+                    for t in teachers if isinstance(t, dict)
+                )
+                if teacher_abbr:
+                    info_parts.append(teacher_abbr)
+
+            # Change reason
+            reason = lesson.get("substitutionText") or lesson.get("comment") or ""
+            if reason:
+                info_parts.append(reason)
+
+            # Type label for non-regular lessons (if no other info)
+            if not info_parts and lesson_type != "regularLesson":
+                type_label = LESSON_TYPE_LABELS.get(lesson_type, lesson_type)
+                info_parts.append(type_label)
+
+            # Assemble line
+            if line_parts:
+                line = ": ".join(line_parts)
+                if info_parts:
+                    line += f" ({', '.join(info_parts)})"
+                lines.append(line)
+
+        return "\n".join(lines) if lines else "Keine Stunden"
 
 
 class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
@@ -729,7 +846,16 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         self._attr_icon = "mdi:school"
 
     def _parse_german_grade(self, grade_value: str | float) -> float | None:
-        """Parse German grade formats and return numeric value."""
+        """Parse German grade formats and return numeric value.
+
+        Handles formats like:
+        - "0~3" -> 3.0
+        - "0~3+" -> 3.0
+        - "0~2-" -> 2.0
+        - "3+" -> 3.0
+        - "2-" -> 2.0
+        - "2.5" -> 2.5
+        """
         if not grade_value and grade_value != 0:
             return None
 
@@ -741,16 +867,22 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         if not grade_str:
             return None
 
-        # Handle format "0~3" -> 3.0
+        # Handle format "0~3" or "0~3+" or "0~2-" -> extract after tilde
         if "~" in grade_str:
             try:
-                return float(grade_str.split("~")[1])
+                # Split by tilde and get the part after it
+                grade_part = grade_str.split("~")[1]
+                # Remove tendency markers (+/-)
+                if grade_part.endswith(("+", "-")):
+                    grade_part = grade_part[:-1]
+                return float(grade_part)
             except (ValueError, IndexError):
                 return None
 
-        # Handle formats like "4+", "4-", "2+"
+        # Handle formats like "4+", "4-", "2+" (without tilde prefix)
         if grade_str.endswith(("+", "-")):
             try:
+                # Treat both 4+ and 4- as 4.0 (ignore plus/minus for calculation)
                 return float(grade_str[:-1])
             except ValueError:
                 return None
@@ -875,7 +1007,8 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
 
         # Build human-readable summaries (plain text and Markdown)
         def _format_grade_line(g: dict) -> str:
-            val = str(g.get("value", "")).strip()
+            # Use display_value if available (clean notation like "3+", "2-"), otherwise fallback to value
+            val = str(g.get("display_value") or g.get("value", "")).strip()
             topic = (g.get("topic") or "").strip()
             date = (g.get("date") or "").strip()
             type_abbr = (g.get("type_abbreviation") or "").strip()
@@ -957,7 +1090,16 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
         self._attr_icon = "mdi:school"
 
     def _parse_german_grade(self, grade_value: str | float) -> float | None:
-        """Parse German grade formats and return numeric value."""
+        """Parse German grade formats and return numeric value.
+
+        Handles formats like:
+        - "0~3" -> 3.0
+        - "0~3+" -> 3.0
+        - "0~2-" -> 2.0
+        - "3+" -> 3.0
+        - "2-" -> 2.0
+        - "2.5" -> 2.5
+        """
         if not grade_value and grade_value != 0:
             return None
 
@@ -969,16 +1111,22 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
         if not grade_str:
             return None
 
-        # Handle format "0~3" -> 3.0
+        # Handle format "0~3" or "0~3+" or "0~2-" -> extract after tilde
         if "~" in grade_str:
             try:
-                return float(grade_str.split("~")[1])
+                # Split by tilde and get the part after it
+                grade_part = grade_str.split("~")[1]
+                # Remove tendency markers (+/-)
+                if grade_part.endswith(("+", "-")):
+                    grade_part = grade_part[:-1]
+                return float(grade_part)
             except (ValueError, IndexError):
                 return None
 
-        # Handle formats like "4+", "4-", "2+"
+        # Handle formats like "4+", "4-", "2+" (without tilde prefix)
         if grade_str.endswith(("+", "-")):
             try:
+                # Treat both 4+ and 4- as 4.0 (ignore plus/minus for calculation)
                 return float(grade_str[:-1])
             except ValueError:
                 return None
@@ -1286,3 +1434,72 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
             "upcoming_exams": upcoming_exams[:5],  # Show next 5 exams
             "last_updated": datetime.now().isoformat(),
         }
+
+
+class SchoolDiagnosticSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
+    """Diagnostic sensor showing which school a student belongs to.
+
+    Only relevant for multi-school accounts. For single-school accounts,
+    this sensor will show "Unknown" or a default value.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:school"
+    _attr_translation_key = "school"
+
+    def __init__(
+        self,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        student_slug: str,
+        school_name: str | None,
+        school_id: int | None,
+    ) -> None:
+        """Initialize the school diagnostic sensor."""
+        super().__init__(coordinator)
+        self.student_id = student_id
+        self.student_name = student_name
+        self._school_name = school_name
+        self._school_id = school_id
+
+        # Unique ID based on student ID
+        self._attr_unique_id = f"schulmanager_{self.student_id}_school"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"student_{self.student_id}")},
+            name=self.student_name,
+            manufacturer="Schulmanager Online",
+            model="Schüler",
+            suggested_area="Schule",
+            configuration_url="https://login.schulmanager-online.de/",
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return bool(self.coordinator.last_update_success)
+
+    @property
+    def native_value(self) -> str:
+        """Return the name of the school."""
+        if self._school_name:
+            return self._school_name
+        return "Unbekannt"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra state attributes."""
+        attrs: dict[str, Any] = {}
+
+        if self._school_id is not None:
+            attrs["school_id"] = self._school_id
+
+        if self._school_name:
+            attrs["school_name"] = self._school_name
+
+        return attrs

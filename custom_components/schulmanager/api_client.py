@@ -10,6 +10,7 @@ later if we further constrain error types upstream.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 import hashlib
 import json
@@ -1020,7 +1021,16 @@ class SchulmanagerClient:
         return f"Fach {subject_id}", f"F{str(subject_id)[-2:]}"
 
     def _parse_german_grade(self, grade_value: str | float) -> float | None:
-        """Parse German grade formats and return numeric value."""
+        """Parse German grade formats and return numeric value.
+
+        Handles formats like:
+        - "0~3" -> 3.0
+        - "0~3+" -> 3.0
+        - "0~2-" -> 2.0
+        - "3+" -> 3.0
+        - "2-" -> 2.0
+        - "2.5" -> 2.5
+        """
         if not grade_value and grade_value != 0:
             return None
 
@@ -1032,17 +1042,22 @@ class SchulmanagerClient:
         if not grade_str:
             return None
 
-        # Handle format "0~3" -> 3.0
+        # Handle format "0~3" or "0~3+" or "0~2-" -> extract after tilde
         if "~" in grade_str:
             try:
-                return float(grade_str.split("~")[1])
+                # Split by tilde and get the part after it
+                grade_part = grade_str.split("~")[1]
+                # Remove tendency markers (+/-)
+                if grade_part.endswith(("+", "-")):
+                    grade_part = grade_part[:-1]
+                return float(grade_part)
             except (ValueError, IndexError):
                 return None
 
-        # Handle formats like "4+", "4-", "2+"
+        # Handle formats like "4+", "4-", "2+" (without tilde prefix)
         if grade_str.endswith(("+", "-")):
             try:
-                # Treat both 4+ and 4- as 4.0 (ignore plus/minus for simplicity)
+                # Treat both 4+ and 4- as 4.0 (ignore plus/minus for calculation)
                 return float(grade_str[:-1])
             except ValueError:
                 return None
@@ -1230,20 +1245,30 @@ class SchulmanagerClient:
                 grade_type_name = grade_type_info.get("name", "Sonstige")
 
                 # Create grade entry
-                # Normalize grade value: map formats like "0~2" -> 2.0, "4+" -> 4.0
+                # Normalize grade value: map formats like "0~2" -> 2.0, "0~3+" -> 3.0
                 parsed_value = self._parse_german_grade(grade_value)
                 tendency = None
+                display_value = grade_value  # Default to original
+
                 if isinstance(grade_value, str):
+                    # Extract tendency from original value
                     if grade_value.endswith("+"):
                         tendency = "plus"
                     elif grade_value.endswith("-"):
                         tendency = "minus"
 
+                    # Create clean display value (remove "0~" prefix if present)
+                    if "~" in grade_value:
+                        # "0~3+" -> "3+", "0~2" -> "2", "0~3-" -> "3-"
+                        display_value = grade_value.split("~")[1]
+                    # else: already clean ("3+", "2", "4-")
+
                 grade_entry = {
-                    # Store normalized numeric where possible
+                    # Store normalized numeric for calculations (3+ and 3- both = 3.0)
                     "value": parsed_value if parsed_value is not None else grade_value,
-                    "original_value": grade_value,
-                    "tendency": tendency,
+                    "display_value": display_value,  # Clean notation for display (e.g. "3+", "2-", "2")
+                    "original_value": grade_value,  # Keep API format for debugging
+                    "tendency": tendency,  # "plus", "minus", or None
                     "date": event.get("date"),
                     "topic": event.get("topic", ""),
                     "weighting": event.get("weighting", 1),
@@ -1386,4 +1411,149 @@ class SchulmanagerClient:
         self.data = result
         # Optional dump
         await self._dump("hub_data.json", result)
+        return result
+
+
+class MultiSchoolClient:
+    """Wrapper client for managing multiple schools in multi-school accounts.
+
+    This client handles parallel login to multiple schools and aggregates
+    student data from all schools with school information attached.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        username: str,
+        password: str,
+        debug_dumps: bool = False,
+    ) -> None:
+        """Initialize multi-school client."""
+        self.hass = hass
+        self.username = username
+        self.password = password
+        self.debug_dumps = debug_dumps
+        self.clients: dict[int, SchulmanagerClient] = {}  # school_id -> client
+        self.school_names: dict[int, str] = {}  # school_id -> school_name
+        self._all_students: list[dict[str, Any]] = []
+
+    async def async_login_all_schools(
+        self, schools: list[dict[str, Any]]
+    ) -> None:
+        """Login to all schools in parallel and collect students.
+
+        Args:
+            schools: List of school dicts with 'id' and 'label' keys
+        """
+        _LOGGER.info("Logging into %d schools in parallel", len(schools))
+
+        async def login_to_school(school: dict[str, Any]) -> tuple[int, str, SchulmanagerClient]:
+            """Login to a single school and return client."""
+            school_id = school["id"]
+            school_name = school["label"]
+
+            _LOGGER.debug("Logging into school: %s (ID: %d)", school_name, school_id)
+
+            client = SchulmanagerClient(
+                self.hass,
+                self.username,
+                self.password,
+                debug_dumps=self.debug_dumps,
+                institution_id=school_id,
+            )
+
+            await client.async_login()
+            return school_id, school_name, client
+
+        # Login to all schools in parallel
+        login_tasks = [login_to_school(school) for school in schools]
+        results = await asyncio.gather(*login_tasks, return_exceptions=True)
+
+        # Process results
+        for result in results:
+            if isinstance(result, Exception):
+                _LOGGER.error("Failed to login to school: %s", result)
+                continue
+
+            school_id, school_name, client = result
+            self.clients[school_id] = client
+            self.school_names[school_id] = school_name
+
+            # Collect students from this school and add school info
+            students = client.get_students()
+            for student in students:
+                student_with_school = student.copy()
+                student_with_school["school_id"] = school_id
+                student_with_school["school_name"] = school_name
+                self._all_students.append(student_with_school)
+
+            _LOGGER.info(
+                "Logged into school '%s': %d students found",
+                school_name,
+                len(students),
+            )
+
+        _LOGGER.info(
+            "Multi-school login complete: %d schools, %d total students",
+            len(self.clients),
+            len(self._all_students),
+        )
+
+    def get_all_students(self) -> list[dict[str, Any]]:
+        """Return all students from all schools with school information."""
+        return list(self._all_students)
+
+    def get_client(self, school_id: int) -> SchulmanagerClient | None:
+        """Get the client for a specific school ID."""
+        return self.clients.get(school_id)
+
+    def get_school_name(self, school_id: int) -> str:
+        """Get the school name for a specific school ID."""
+        return self.school_names.get(school_id, f"School {school_id}")
+
+    def has_token(self) -> bool:
+        """Return True if at least one client has a token."""
+        return any(client.has_token() for client in self.clients.values())
+
+    def has_bundle_version(self) -> bool:
+        """Return True if at least one client has bundle version."""
+        return any(client.has_bundle_version() for client in self.clients.values())
+
+    async def async_update(
+        self,
+        enabled_features: dict[str, bool] | None = None,
+        date_range_config: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
+        """Update data from all schools and aggregate results.
+
+        Returns:
+            Aggregated data dict with students from all schools
+        """
+        result: dict[str, Any] = {
+            "students": list(self._all_students),
+            "homework": {},
+            "schedule": {},
+            "exams": {},
+            "grades": {},
+        }
+
+        # Update all clients in parallel
+        async def update_client(client: SchulmanagerClient) -> dict[str, Any]:
+            """Update a single client."""
+            return await client.async_update(enabled_features, date_range_config)
+
+        update_tasks = [update_client(client) for client in self.clients.values()]
+        client_results = await asyncio.gather(*update_tasks, return_exceptions=True)
+
+        # Aggregate results from all schools
+        for client_result in client_results:
+            if isinstance(client_result, Exception):
+                _LOGGER.error("Failed to update school data: %s", client_result)
+                continue
+
+            # Merge student data from this school
+            for key in ["homework", "schedule", "exams", "grades"]:
+                if key in client_result:
+                    result[key].update(client_result[key])
+
         return result

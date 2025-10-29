@@ -5,12 +5,15 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import timedelta
 import logging
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
+if TYPE_CHECKING:
+    from .api_client import MultiSchoolClient, SchulmanagerClient
 
 from .const import (
     DEFAULT_SCHEDULE_WEEKS,
@@ -28,10 +31,25 @@ from .utils import (
 _LOGGER = logging.getLogger(__name__)
 
 class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
-    """Coordinator for Schulmanager integration with cooldown support."""
+    """Coordinator for Schulmanager integration with cooldown support.
 
-    def __init__(self, hass: HomeAssistant, client: Any, config_entry: ConfigEntry) -> None:
-        """Initialize the coordinator with cooldown tracking."""
+    Supports both single-school (SchulmanagerClient) and multi-school
+    (MultiSchoolClient) configurations.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: SchulmanagerClient | MultiSchoolClient,
+        config_entry: ConfigEntry,
+    ) -> None:
+        """Initialize the coordinator with cooldown tracking.
+
+        Args:
+            hass: Home Assistant instance
+            client: SchulmanagerClient or MultiSchoolClient instance
+            config_entry: Config entry for this integration
+        """
         # Get the update interval from config, with validation
         interval_hours = get_validated_auto_update_interval(config_entry)
         interval_seconds = interval_hours * 3600  # Convert hours to seconds

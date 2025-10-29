@@ -1,12 +1,36 @@
 # Schulmanager Integration – Changelog
 
-## Unveröffentlicht
+## 0.6.0 (2025-10-29)
 
-### Verbesserungen
-- Tabellen nutzen jetzt `width="100%"`, damit die Anzeige die gesamte Kartenbreite einnimmt.
-- Stundennummern aus der API bleiben erhalten; die Anzeige sortiert nur aufsteigend und fasst Ausfälle mit Ersatzstunden im selben Block zusammen.
-- Stundenplan-Zeilen zeigen die Stundenangabe oben, Kopfzeilen sind linksbündig und markierte Änderungen erhalten ein hellblaues Hintergrund-Highlight ohne "Typ"-Präfix bei Sonderstunden.
-- Stundenplan-HTML überarbeitet: Jede Stunde nutzt nun zwei Zeilen, Änderungen werden in der Akzentfarbe hervorgehoben und entfallene Fach-/Lehrkraft-/Raum-Informationen in der zweiten Zeile durchgestrichen angezeigt. Ausfälle erscheinen nicht länger als eigener Block.
+### 🎯 Wichtige Verbesserungen
+
+**Multi-School Support komplett überarbeitet**
+- **Automatische Verwaltung aller Schulen**: Bei Accounts mit Kindern an mehreren Schulen werden jetzt automatisch alle Kinder eingebunden – ohne manuelle Schulauswahl
+- **Neuer Diagnose-Sensor**: Jeder Schüler erhält einen "Schule"-Sensor, der anzeigt, zu welcher Schule er gehört
+- **Behebt Login-Problem aus v0.5.3**: Der manuelle Schulauswahl-Dialog von v0.5.3 führte bei einigen Nutzern zu Anmeldefehlern (Status 401). Diese Probleme sind jetzt behoben – die Integration loggt sich parallel zu allen Schulen ein
+- **Automatische Migration**: Bestehende Installationen werden beim Update automatisch migriert, keine Neueinrichtung nötig
+
+**Noten werden jetzt korrekt angezeigt**
+- Noten mit Tendenz (z.B. 3+, 2-, 4+) werden nun sauber dargestellt
+- Die API liefert manchmal das Format "0~3+" – die Integration zeigt jetzt einfach "3+" an
+- Die Durchschnittsberechnung behandelt 3+, 3 und 3- alle gleich als 3.0
+- Betroffene Sensoren: Alle Noten-Sensoren pro Fach und Gesamtdurchschnitt
+
+**Neues "plain" Attribut für Benachrichtigungen**
+- Stundenplan-Sensoren (heute/morgen) haben jetzt ein zusätzliches `plain`-Attribut
+- Perfekt für Benachrichtigungen und Sprachausgabe
+- Verwendet die gleiche Emoji-Logik wie der Kalender (❌ Entfall, 🔁 Vertretung, 🚪 Raumwechsel, 📝 Prüfung)
+- Beispiel: `"1. Std: 🔁 Mathematik – Raum 204 (Vertretung, Hr. Müller)"`
+
+### 🐛 Fehlerbehebungen
+- Verwaiste Übersetzungen für den entfernten Schulauswahl-Dialog entfernt
+- Schule-Sensor hatte fehlende Entitäts-Attribute
+
+### ⚠️ Wichtige Hinweise
+- Falls Sie v0.5.3 nutzen und Multi-School-Probleme hatten: Nach dem Update auf v0.6.0 sollten alle Kinder automatisch sichtbar sein
+- Die automatische Migration kann ein paar Sekunden dauern beim ersten Start nach dem Update
+
+---
 
 ## 0.5.3 (2025-10-27)
 
@@ -17,64 +41,36 @@
   - Nach der Schulauswahl erfolgt ein zweiter Login mit der gewählten `institutionId`
   - Der Re-Authentication-Flow behält die gespeicherte `institutionId` bei
   - Neue Übersetzungen für den Schulauswahl-Schritt in `strings.json`
-  - Betroffene Dateien: `api_client.py`, `config_flow.py`, `strings.json`
 
 ### Fehlerbehebungen
 - **Multi-School-Login**: Der bisherige Ansatz (v0.5.2) versuchte, die `institutionId` aus der Login-Response zu extrahieren, aber bei Multi-School-Accounts fehlt das `user`-Objekt komplett. Jetzt wird stattdessen eine explizite Schulauswahl durch den Nutzer ermöglicht.
+
+**Hinweis**: v0.5.3 hatte bei einigen Nutzern Login-Probleme (Status 401). Bitte auf v0.6.0 updaten.
 
 ## 0.5.2 (2025-10-20)
 
 ### Funktionen
 - **Mehrschul-Unterstützung** (Issue #2): Konten mit Kindern an mehreren Schulen werden zuverlässig verarbeitet
   - `institutionId` wird nach erfolgreichem Login automatisch extrahiert und gespeichert
-  - Bei Re-Authentication kommt die gespeicherte `institutionId` erneut zum Einsatz, um Doppelabfragen zu vermeiden
-  - Der Config Flow aktiviert nach erfolgreichem Login automatisch Debug-Dumps für eine schnellere Fehlerdiagnose
-  - Betroffene Dateien: `api_client.py`, `config_flow.py`, `__init__.py`
+  - Bei Re-Authentication kommt die gespeicherte `institutionId` erneut zum Einsatz
+  - Der Config Flow aktiviert nach erfolgreichem Login automatisch Debug-Dumps
 
 ## 0.5.1 (2025-10-20)
 
 ### Fehlerbehebungen
-- **Schedule-Sensor Tabellen-Sortierung**: HTML-Attribut in den Stundenplan-Sensoren (`schedule_today`, `schedule_tomorrow`) korrigiert, sodass Stunden nun chronologisch nach `classHour.number` angezeigt werden. Zuvor erfolgte die Anzeige in API-Reihenfolge, wodurch die Tabelle unsortiert sein konnte. Jetzt werden die Stunden vor dem Rendern der HTML-Tabelle nach `classHour.number` sortiert.
-  - Betroffene Datei: `sensor.py` (`ScheduleSensor.extra_state_attributes`)
-  - Neu hinzugefügt: Hilfsfunktion `get_hour_number()` für eine robuste Ermittlung der Stundennummer
-  - Stunden ohne Stundennummer landen am Ende der Liste (`hour=999`)
-
-### Repository-/CI-Änderungen
-- **Nächtliche Validierung entfernt**: `.github/workflows/validate.yml` gestrichen, um Fehlermeldungen während der Beta-Phase zu vermeiden. Die HACS-Validierung läuft weiterhin über den Workflow `release.yml` und kann ab Version 1.0.0 wieder aktiviert werden.
+- **Schedule-Sensor Tabellen-Sortierung**: Stunden werden nun chronologisch nach Stundennummer angezeigt
+- **Nächtliche Validierung entfernt**: Workflow gestrichen, um Fehlermeldungen während der Beta-Phase zu vermeiden
 
 ## 0.5.0
 
-- Pro Schüler eigene Kalender:
-  - „SCHÜLERNAME Stundenplan" (Titel: Fach – Raum)
-  - „SCHÜLERNAME Arbeiten"
-- Doppelte Termine vermeiden: Ausfälle + Ersatzstunde in derselben Stunde werden zusammengeführt; der Ausfall steht in der Beschreibung
-- Emoji-Hervorhebung (optional): ❌ Ausfall, 🔁 Vertretung/Sonderstunde/Lehrerwechsel, 🚪 Raumwechsel, 📝 Prüfung
-- Optionen:
-  - Wochenvorschau für den Stundenplan (1–3 Wochen)
-  - Emoji-Hervorhebung an/aus
-  - Ausfälle ausblenden, wenn Hervorhebung aus ist (oder als „X" im Titel anzeigen)
-  - Abkühlzeit für manuelle Aktualisierung
-- Vereinheitlichte Schedule-Fallbacks (`today`/`tomorrow`/`week`/`changes`)
-- Verbesserte Zeitenzuordnung per Stundennummer (Fallback, falls API-Zeiten fehlen)
-- Typing/Lint/Diagnostics verfeinert
+- Pro Schüler eigene Kalender (Stundenplan & Arbeiten)
+- Emoji-Hervorhebung für Stundenplanänderungen (optional)
+- Konfigurierbare Wochenvorschau (1–3 Wochen)
+- Manuelle Aktualisierung mit Cooldown
+- Ereignisse für neue Hausaufgaben und Noten
 
-## 0.4.0
+## 0.4.0 und älter
 
-- Stabile eindeutige IDs pro Schüler/Fach; Laufzeitdaten werden über `entry.runtime_data` verwaltet
-- Diagnostik mit Schwärzung sensibler Daten; Debug-Dumps auf Dateien vom Muster `*response*.json` reduziert
-- Ereignisse für neue Daten (erst nach dem initialen Refresh):
-  - `schulmanager_homework_new`
-  - `schulmanager_grade_new`
-- Änderungen im Stundenplan werden zu Stundenblöcken zusammengeführt (angrenzende/duplizierte Stunden konsolidiert)
-- Noten werden normalisiert (z. B. `0~2` → `2.0`), Tendenzen als `plus`/`minus` gespeichert
-- Noten-Entitäten liefern lesbare Zusammenfassungen:
-  - `grades_summary`
-  - `grades_summary_markdown`
-- Cooldown für Koordinator sowie manuellen Aktualisierungs-Button
-- `DeviceInfo` enthält `sw_version` nur noch am Service-Gerät (Integrationsversion)
-- Übersetzungen (EN/DE) mit `strings.json` synchronisiert
-- TypedDicts für Stundenplan/Noten; strengere Typisierung in Koordinator und Plattformen
-
-## 0.3.x und älter
-
-- Erste Iterationen der Custom-Integration (Hausaufgaben, Stundenplan, Prüfungen, Noten)
+- Initiale Versionen mit Hausaufgaben, Stundenplan, Prüfungen und Noten-Sensoren
+- Diagnostik-Unterstützung
+- TypedDicts und verbesserte Typisierung
