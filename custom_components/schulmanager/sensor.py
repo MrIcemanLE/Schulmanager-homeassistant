@@ -1316,17 +1316,12 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
                 continue
 
             try:
-                # Parse the date (should be YYYY-MM-DD format)
-                if "T" in exam_date:
-                    exam_date_obj = datetime.fromisoformat(exam_date).date()
-                else:
-                    exam_date_obj = datetime.fromisoformat(exam_date).date()
-
+                # Parse the date (ISO-Format)
+                exam_date_obj = datetime.fromisoformat(exam_date).date()
                 # Only consider future exams
                 if exam_date_obj >= now:
                     if next_exam_date is None or exam_date_obj < next_exam_date:
                         next_exam_date = exam_date_obj
-
             except (ValueError, TypeError):
                 try:
                     exam_date_obj = datetime.strptime(exam_date, "%Y-%m-%d").date()
@@ -1344,7 +1339,7 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Return additional exam information."""
+        """Return additional exam information (null-safe for subject/type)."""
         integ = cast(IntegrationData | None, self.coordinator.data)
         items: list[dict[str, Any]] = (
             []
@@ -1374,56 +1369,33 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
             if not exam_date:
                 continue
 
+            # Resolve nested dicts null-safe
+            subj = (exam.get("subject") or {})
+            typ = (exam.get("type") or {})
+
             try:
-                # Parse the date
-                if "T" in exam_date:
-                    exam_date_obj = datetime.fromisoformat(exam_date).date()
-                else:
-                    exam_date_obj = datetime.fromisoformat(exam_date).date()
-
-                # Only consider future exams
-                if exam_date_obj >= now:
-                    # Add to upcoming list
-                    exam_info = {
-                        "date": exam_date_obj.isoformat(),
-                        "days_from_now": (exam_date_obj - now).days,
-                        "subject": exam.get("subject", {}).get(
-                            "name", "Unbekanntes Fach"
-                        ),
-                        "subject_abbr": exam.get("subject", {}).get("abbreviation", ""),
-                        "type": exam.get("type", {}).get("name", "Prüfung"),
-                        "comment": exam.get("comment", ""),
-                    }
-                    upcoming_exams.append(exam_info)
-
-                    # Check if this is the next exam
-                    if next_exam_date is None or exam_date_obj < next_exam_date:
-                        next_exam_date = exam_date_obj
-                        next_exam = exam_info
-
+                exam_date_obj = datetime.fromisoformat(exam_date).date()
             except (ValueError, TypeError):
                 try:
                     exam_date_obj = datetime.strptime(exam_date, "%Y-%m-%d").date()
-                    if exam_date_obj >= now:
-                        exam_info = {
-                            "date": exam_date_obj.isoformat(),
-                            "days_from_now": (exam_date_obj - now).days,
-                            "subject": exam.get("subject", {}).get(
-                                "name", "Unbekanntes Fach"
-                            ),
-                            "subject_abbr": exam.get("subject", {}).get(
-                                "abbreviation", ""
-                            ),
-                            "type": exam.get("type", {}).get("name", "Prüfung"),
-                            "comment": exam.get("comment", ""),
-                        }
-                        upcoming_exams.append(exam_info)
-
-                        if next_exam_date is None or exam_date_obj < next_exam_date:
-                            next_exam_date = exam_date_obj
-                            next_exam = exam_info
                 except (ValueError, TypeError):
                     continue
+
+            # Only consider future exams
+            if exam_date_obj >= now:
+                exam_info = {
+                    "date": exam_date_obj.isoformat(),
+                    "days_from_now": (exam_date_obj - now).days,
+                    "subject": subj.get("name", "Unbekanntes Fach"),
+                    "subject_abbr": subj.get("abbreviation", ""),
+                    "type": typ.get("name", "Prüfung"),
+                    "comment": exam.get("comment", ""),
+                }
+                upcoming_exams.append(exam_info)
+
+                if next_exam_date is None or exam_date_obj < next_exam_date:
+                    next_exam_date = exam_date_obj
+                    next_exam = exam_info
 
         # Sort upcoming exams by date
         upcoming_exams.sort(key=lambda x: x["date"])

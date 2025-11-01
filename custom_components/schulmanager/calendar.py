@@ -48,9 +48,37 @@ async def async_setup_entry(
         opts.get(OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT, False)
     )
 
-    for st in client.get_students():
-        sid = st["id"]
-        name = st["name"]
+    # Schüler robust laden (neue API bevorzugt)
+    try:
+        if hasattr(client, "get_all_students"):
+            students = client.get_all_students()
+        elif hasattr(client, "get_students"):
+            _LOGGER.warning(
+                "Using deprecated get_students(); please migrate client to get_all_students()"
+            )
+            students = client.get_students()
+        else:
+            _LOGGER.error(
+                "Client has neither get_all_students() nor get_students(); aborting calendar setup"
+            )
+            return
+        _LOGGER.debug(
+            "Students available (calendar): %s",
+            [f"{s.get('id')}:{s.get('name')}" for s in students if isinstance(s, dict)],
+        )
+    except Exception as err:
+        _LOGGER.exception("Failed to load students for calendar: %s", err)
+        return
+
+    for st in students:
+        if not isinstance(st, dict):
+            _LOGGER.debug("Skip non-dict student entry: %r", st)
+            continue
+        sid = st.get("id")
+        name = st.get("name")
+        if not sid or not name:
+            _LOGGER.debug("Skip student with missing id/name: %r", st)
+            continue
         slug = normalize_student_slug(name)
         # Exams calendar
         entities.append(ExamsCalendar(client, coord, sid, name, slug))
@@ -89,8 +117,6 @@ class ExamsCalendar(CalendarEntity):
         self._attr_name = f"{self.student_name} Arbeiten"
         self._attr_icon = "mdi:book-education"
 
-
-
     @property
     def event(self) -> CalendarEvent | None:
         """Return the next upcoming exam event."""
@@ -99,55 +125,41 @@ class ExamsCalendar(CalendarEntity):
         now = dt_util.now()
 
         for exam in items:
-            # Handle exam data structure from API
             exam_date = exam.get("date")
             if not exam_date:
                 continue
 
             try:
-                # Parse the date (should be YYYY-MM-DD format)
-                if "T" in exam_date:
-                    d = datetime.fromisoformat(exam_date).date()
-                else:
-                    d = datetime.fromisoformat(exam_date).date()
+                d = datetime.fromisoformat(exam_date).date()
             except (ValueError, TypeError):
                 try:
                     d = datetime.strptime(exam_date, "%Y-%m-%d").date()
                 except (ValueError, TypeError):
                     continue
 
-            # Create start time based on class hour if available
+            # Create start/end
             start_time = None
             end_time = None
             if "startClassHour" in exam:
                 try:
-                    hour_from = exam["startClassHour"].get("from", "08:00:00")
-                    hour_until = exam["startClassHour"].get("until", "09:00:00")
+                    hour_from = (exam.get("startClassHour") or {}).get("from", "08:00:00")
+                    hour_until = (exam.get("startClassHour") or {}).get("until", "09:00:00")
 
-                    start_time = datetime.strptime(
-                        f"{exam_date} {hour_from}", "%Y-%m-%d %H:%M:%S"
-                    )
-                    end_time = datetime.strptime(
-                        f"{exam_date} {hour_until}", "%Y-%m-%d %H:%M:%S"
-                    )
+                    start_time = datetime.strptime(f"{d.isoformat()} {hour_from}", "%Y-%m-%d %H:%M:%S")
+                    end_time = datetime.strptime(f"{d.isoformat()} {hour_until}", "%Y-%m-%d %H:%M:%S")
 
-                    # Make timezone aware
                     start_time = dt_util.as_local(start_time)
                     end_time = dt_util.as_local(end_time)
                 except (ValueError, TypeError):
-                    # Fall back to all-day event
                     start_time = dt_util.start_of_local_day(d)
                     end_time = start_time + timedelta(days=1)
             else:
-                # All-day event
                 start_time = dt_util.start_of_local_day(d)
                 end_time = start_time + timedelta(days=1)
 
-            # Return the next upcoming exam
             if end_time >= now:
                 summary = self._generate_exam_summary(exam)
                 description = self._generate_exam_description(exam)
-
                 return CalendarEvent(
                     start=start_time,
                     end=end_time,
@@ -169,55 +181,39 @@ class ExamsCalendar(CalendarEntity):
         out: list[CalendarEvent] = []
 
         for exam in items:
-            # Handle exam data structure from API
             exam_date = exam.get("date")
             if not exam_date:
                 continue
 
             try:
-                # Parse the date (should be YYYY-MM-DD format)
-                if "T" in exam_date:
-                    d = datetime.fromisoformat(exam_date).date()
-                else:
-                    d = datetime.fromisoformat(exam_date).date()
+                d = datetime.fromisoformat(exam_date).date()
             except (ValueError, TypeError):
                 try:
                     d = datetime.strptime(exam_date, "%Y-%m-%d").date()
                 except (ValueError, TypeError):
                     continue
 
-            # Create start time based on class hour if available
-            start_time = None
-            end_time = None
+            # Create start/end
             if "startClassHour" in exam:
                 try:
-                    hour_from = exam["startClassHour"].get("from", "08:00:00")
-                    hour_until = exam["startClassHour"].get("until", "09:00:00")
+                    hour_from = (exam.get("startClassHour") or {}).get("from", "08:00:00")
+                    hour_until = (exam.get("startClassHour") or {}).get("until", "09:00:00")
 
-                    start_time = datetime.strptime(
-                        f"{exam_date} {hour_from}", "%Y-%m-%d %H:%M:%S"
-                    )
-                    end_time = datetime.strptime(
-                        f"{exam_date} {hour_until}", "%Y-%m-%d %H:%M:%S"
-                    )
+                    start_time = datetime.strptime(f"{d.isoformat()} {hour_from}", "%Y-%m-%d %H:%M:%S")
+                    end_time = datetime.strptime(f"{d.isoformat()} {hour_until}", "%Y-%m-%d %H:%M:%S")
 
-                    # Make timezone aware
                     start_time = dt_util.as_local(start_time)
                     end_time = dt_util.as_local(end_time)
                 except (ValueError, TypeError):
-                    # Fall back to all-day event
                     start_time = dt_util.start_of_local_day(d)
                     end_time = start_time + timedelta(days=1)
             else:
-                # All-day event
                 start_time = dt_util.start_of_local_day(d)
                 end_time = start_time + timedelta(days=1)
 
-            # Check if event is in requested range
             if end_time < start_date or start_time > end_date:
                 continue
 
-            # Generate summary with type and subject
             summary = self._generate_exam_summary(exam)
             description = self._generate_exam_description(exam)
 
@@ -233,54 +229,48 @@ class ExamsCalendar(CalendarEntity):
         return out
 
     def _generate_exam_summary(self, exam: dict) -> str:
-        """Generate summary text for exam event."""
-        # Get exam type (Test, Klausur, etc.)
-        exam_type = "Prüfung"
-        if "type" in exam and "name" in exam["type"]:
-            exam_type = exam["type"]["name"]
-
-        # Get subject name
-        subject_name = "Unbekanntes Fach"
-        if "subject" in exam:
-            if "abbreviation" in exam["subject"]:
-                subject_name = exam["subject"]["abbreviation"]
-            elif "name" in exam["subject"]:
-                subject_name = exam["subject"]["name"]
-
-        # Format: "Test EN" or "Klausur Mathematik"
+        """Generate summary text for exam event (null-safe)."""
+        t = (exam.get("type") or {})
+        s = (exam.get("subject") or {})
+        exam_type = t.get("name", "Prüfung")
+        subject_name = s.get("abbreviation") or s.get("name") or "Unbekanntes Fach"
         return f"{exam_type} {subject_name}"
 
     def _generate_exam_description(self, exam: dict) -> str:
-        """Generate description text for exam event."""
-        description_parts = []
+        """Generate description text for exam event (null-safe)."""
+        parts = []
 
-        # Add subject details
-        if "subject" in exam and "name" in exam["subject"]:
-            description_parts.append(f"Fach: {exam['subject']['name']}")
+        s = (exam.get("subject") or {})
+        t = (exam.get("type") or {})
 
-        # Add exam type with color if available
-        if "type" in exam:
-            type_info = exam["type"]["name"]
-            if "color" in exam["type"]:
-                type_info += f" ({exam['type']['color']})"
-            description_parts.append(f"Art: {type_info}")
+        subj_name = s.get("name")
+        if subj_name:
+            parts.append(f"Fach: {subj_name}")
 
-        # Add comment/topic if available
-        if exam.get("comment"):
-            description_parts.append(f"Thema: {exam['comment']}")
+        type_name = t.get("name")
+        if type_name:
+            type_info = type_name
+            tcolor = t.get("color")
+            if tcolor:
+                type_info += f" ({tcolor})"
+            parts.append(f"Art: {type_info}")
 
-        # Add class hour info if available
-        if "startClassHour" in exam:
-            hour_info = exam["startClassHour"]
-            if "number" in hour_info:
-                time_info = f"Stunde {hour_info['number']}"
-                if "from" in hour_info and "until" in hour_info:
-                    time_info += (
-                        f" ({hour_info['from'][:5]} - {hour_info['until'][:5]})"
-                    )
-                description_parts.append(f"Zeit: {time_info}")
+        comment = exam.get("comment")
+        if comment:
+            parts.append(f"Thema: {comment}")
 
-        return "\n".join(description_parts)
+        sch = (exam.get("startClassHour") or {})
+        if sch:
+            number = sch.get("number")
+            frm = sch.get("from")
+            until = sch.get("until")
+            if number is not None:
+                time_info = f"Stunde {number}"
+                if frm and until:
+                    time_info += f" ({str(frm)[:5]} - {str(until)[:5]})"
+                parts.append(f"Zeit: {time_info}")
+
+        return "\n".join(parts)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -292,7 +282,6 @@ class ExamsCalendar(CalendarEntity):
             model="Schüler",
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
-
         )
 
     @property
@@ -437,7 +426,6 @@ class ScheduleCalendar(CalendarEntity):
             number = ch.get("number")
             if (not ch.get("from")) and isinstance(number, (int, str)):
                 # Default 45-min blocks with common breaks
-                # You can adjust these to your school's timetable if needed
                 hour_times = {
                     1: ("08:00:00", "08:45:00"),
                     2: ("08:45:00", "09:30:00"),
@@ -472,10 +460,6 @@ class ScheduleCalendar(CalendarEntity):
         """Generate summary and description with emoji highlighting (optional)."""
         lesson_type = lesson.get("type", "regularLesson")
         actual = lesson.get("actualLesson", {}) or {}
-        # We no longer need original subject for title
-        # 'originalLessons' can exist but is not required for summary
-        if lesson_type == "cancelledLesson" and lesson.get("originalLessons"):
-            _ = lesson.get("originalLessons") or []
 
         # Subjects
         new_sub = (actual.get("subject", {}) or {}).get("abbreviation") or (actual.get("subject", {}) or {}).get("name") or ""
@@ -504,10 +488,8 @@ class ScheduleCalendar(CalendarEntity):
 
         # Summary
         if (not self.highlight) and lesson_type == "cancelledLesson":
-            # Simple cancellation marker without emojis
             summary = f"X {base_title}"
         else:
-            # With highlight (or non-cancelled without highlight): optional emoji prefix
             summary = f"{emoji}{base_title}"
 
         # Description with teacher and room

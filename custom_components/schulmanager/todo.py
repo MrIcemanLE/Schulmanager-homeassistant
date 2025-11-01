@@ -23,10 +23,9 @@ _LOGGER = logging.getLogger(__name__)
 
 def _make_uid(student_id: str, item: dict) -> str:
     """Generate unique ID for homework item."""
-    # Vereinfachte UID-Generierung
-    date = item.get('date', '')
-    subject = item.get('subject', '')
-    homework = item.get('homework', '')
+    date = item.get("date", "")
+    subject = item.get("subject", "")
+    homework = item.get("homework", "")
     key = f"{student_id}_{date}{subject}{homework}"
     return hashlib.md5(key.encode("utf-8")).hexdigest()
 
@@ -48,16 +47,43 @@ async def async_setup_entry(
             ", ".join(missing),
         )
         return
+
+    # Schülerliste robust ermitteln (neue API: get_all_students)
+    try:
+        if hasattr(client, "get_all_students"):
+            students = client.get_all_students()
+        elif hasattr(client, "get_students"):
+            _LOGGER.warning(
+                "Using deprecated get_students(); please migrate client to get_all_students()"
+            )
+            students = client.get_students()
+        else:
+            _LOGGER.error("Client has neither get_all_students() nor get_students(); aborting todo setup")
+            return
+    except Exception as err:
+        _LOGGER.exception("Failed to load students for todo: %s", err)
+        return
+
+    # Log nur IDs/Namen zur Diagnose
+    try:
+        _LOGGER.debug(
+            "Students available (todo): %s",
+            [f"{s.get('id')}:{s.get('name')}" for s in students if isinstance(s, dict)],
+        )
+    except Exception:  # defensive
+        pass
+
     entities: list[TodoListEntity] = []
-
-    # Debug: Prüfe ob Schüler vorhanden
-    _LOGGER.debug("Students available: %s", client.get_students())
-
-    for st in client.get_students():
-        sid = st["id"]
-        name = st["name"]
+    for st in students:
+        if not isinstance(st, dict):
+            _LOGGER.debug("Skip non-dict student entry: %r", st)
+            continue
+        sid = st.get("id")
+        name = st.get("name")
+        if not sid or not name:
+            _LOGGER.debug("Skip student with missing id/name: %r", st)
+            continue
         slug = normalize_student_slug(name)
-
         _LOGGER.debug("Creating todo entity for student %s (ID: %s)", name, sid)
         entities.append(HomeworkTodoList(client, coord, sid, name, slug))
 
@@ -98,7 +124,7 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         _LOGGER.info(
             "HomeworkTodoList %s (student %s) added to hass, subscribing to coordinator",
             self._attr_unique_id,
-            self.student_id
+            self.student_id,
         )
         await super().async_added_to_hass()
         # Force an immediate update to make sure entity receives current data
@@ -129,17 +155,13 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
             "Updating homework items for student %s: found %d items. Available students in homework data: %s",
             self.student_id,
             len(student_homework),
-            list(homework_data.keys())
+            list(homework_data.keys()),
         )
 
         # Create a map of existing items by UID for status preservation
         existing_items = {}
         if self._attr_todo_items:
-            existing_items = {
-                item.uid: item
-                for item in self._attr_todo_items
-                if item.uid
-            }
+            existing_items = {item.uid: item for item in self._attr_todo_items if item.uid}
 
         if not student_homework:
             self._attr_todo_items = []
@@ -148,23 +170,16 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
             current_uids = set()
 
             for item in student_homework:
-                # Debug: Zeige Item-Details
                 _LOGGER.debug("Processing homework item: %s", item)
-
                 uid = _make_uid(self.student_id, item)
                 current_uids.add(uid)
 
-                # Erstelle Titel aus Fach und Hausaufgabe
-                subject = item.get("subject", "").strip()
-                homework = item.get("homework", "").strip()
-                date = item.get("date", "").strip()
+                subject = str(item.get("subject", "") or "").strip()
+                homework = str(item.get("homework", "") or "").strip()
+                date = str(item.get("date", "") or "").strip()
 
-                # Verschiedene Titel-Formate probieren
                 if subject and homework:
-                    if date:
-                        title = f"[{date}] {subject}: {homework}"
-                    else:
-                        title = f"{subject}: {homework}"
+                    title = f"[{date}] {subject}: {homework}" if date else f"{subject}: {homework}"
                 elif homework:
                     title = homework
                 elif subject:
@@ -172,33 +187,28 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
                 else:
                     title = "Hausaufgabe"
 
-                # Titel-Länge begrenzen
                 title = title[:255]
 
-                # Preserve existing status if item already exists
                 existing_item = existing_items.get(uid)
-                status = (
-                    existing_item.status
-                    if existing_item
-                    else TodoItemStatus.NEEDS_ACTION
-                )
+                status = existing_item.status if existing_item else TodoItemStatus.NEEDS_ACTION
 
-                todo_items.append(TodoItem(
-                    summary=title,
-                    uid=uid,
-                    status=status
-                ))
+                todo_items.append(
+                    TodoItem(
+                        summary=title,
+                        uid=uid,
+                        status=status,
+                    )
+                )
 
                 if existing_item:
                     _LOGGER.debug(
                         "Preserved status for TodoItem: %s (uid: %s, status: %s)",
-                        title[:50], uid[:8], status
+                        title[:50],
+                        uid[:8],
+                        status,
                     )
                 else:
-                    _LOGGER.debug(
-                        "Created new TodoItem: %s (uid: %s)",
-                        title[:50], uid[:8]
-                    )
+                    _LOGGER.debug("Created new TodoItem: %s (uid: %s)", title[:50], uid[:8])
 
             # Log removed items for debugging
             if existing_items:
@@ -208,33 +218,25 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
                         "Removed %d outdated todo items for student %s: %s",
                         len(removed_uids),
                         self.student_id,
-                        [uid[:8] for uid in removed_uids]
+                        [uid[:8] for uid in removed_uids],
                     )
 
             self._attr_todo_items = todo_items
 
-        _LOGGER.debug(
-            "Updated %d todo items for student %s",
-            len(self._attr_todo_items or []),
-            self.student_id
-        )
+        _LOGGER.debug("Updated %d todo items for student %s", len(self._attr_todo_items or []), self.student_id)
         super()._handle_coordinator_update()
 
     async def async_create_todo_item(self, _item: TodoItem) -> None:
         """Create a new todo item."""
-        raise NotImplementedError(
-            "Cannot create items in a homework list from Schulmanager"
-        )
+        raise NotImplementedError("Cannot create items in a homework list from Schulmanager")
 
     async def async_update_todo_item(self, item: TodoItem) -> None:
         """Update an existing todo item (status changes only)."""
         if not item.uid or not self._attr_todo_items:
             return
 
-        # Find and update the item in our local list
         for i, existing_item in enumerate(self._attr_todo_items):
             if existing_item.uid == item.uid:
-                # Only allow status updates, preserve other fields from original
                 updated_item = TodoItem(
                     summary=existing_item.summary,
                     uid=existing_item.uid,
@@ -248,17 +250,13 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
                     "Updated TodoItem status: %s (uid: %s, status: %s)",
                     (existing_item.summary or "")[:50],
                     (item.uid or "unknown")[:8],
-                    updated_item.status
+                    updated_item.status,
                 )
 
-                # Notify Home Assistant of the state change
                 self.async_write_ha_state()
                 return
 
-        _LOGGER.warning(
-            "TodoItem with uid %s not found for update",
-            (item.uid or "unknown")[:8]
-        )
+        _LOGGER.warning("TodoItem with uid %s not found for update", (item.uid or "unknown")[:8])
 
     async def async_delete_todo_items(self, _uids: list[str]) -> None:
         """Delete todo items."""
