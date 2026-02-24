@@ -125,7 +125,7 @@ action:
     data:
       title: "Stundenplan heute"
       message: |
-        {{ state_attr('sensor.schueler_a_schedule_today', 'plain') }}
+        {{ state_attr('sensor.schueler_beispiel_schedule_today', 'plain') }}
 ```
 
 Das neue `plain` Attribut enthält eine lesbare Version des Stundenplans mit Emoji-Markierung.
@@ -146,13 +146,13 @@ type: vertical-stack
 cards:
   - type: calendar
     entities:
-      - calendar.schueler_a_stundenplan
+      - calendar.schueler_beispiel_stundenplan
   - type: todo-list
-    entity: todo.schueler_a_hausaufgaben
+    entity: todo.schueler_beispiel_hausaufgaben
   - type: entities
     entities:
-      - sensor.schueler_a_noten_gesamt
-      - sensor.schueler_a_next_exam_days
+      - sensor.schueler_beispiel_noten_gesamt
+      - sensor.schueler_beispiel_next_exam_days
 ```
 
 ## ❓ Häufige Fragen
