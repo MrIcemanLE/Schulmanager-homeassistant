@@ -23,10 +23,9 @@ _LOGGER = logging.getLogger(__name__)
 
 def _make_uid(student_id: str, item: dict) -> str:
     """Generate unique ID for homework item."""
-    # Vereinfachte UID-Generierung
-    date = item.get('date', '')
-    subject = item.get('subject', '')
-    homework = item.get('homework', '')
+    date = item.get("date", "")
+    subject = item.get("subject", "")
+    homework = item.get("homework", "")
     key = f"{student_id}_{date}{subject}{homework}"
     return hashlib.md5(key.encode("utf-8")).hexdigest()
 
@@ -48,14 +47,34 @@ async def async_setup_entry(
             ", ".join(missing),
         )
         return
+    # Load students robustly (prefer get_all_students for multi-school clients)
+    try:
+        if hasattr(client, "get_all_students"):
+            students = client.get_all_students()
+        elif hasattr(client, "get_students"):
+            _LOGGER.warning(
+                "Using deprecated get_students(); please migrate client to get_all_students()"
+            )
+            students = client.get_students()
+        else:
+            _LOGGER.error(
+                "Client has neither get_all_students() nor get_students(); aborting todo setup"
+            )
+            return
+    except Exception as err:  # noqa: BLE001 - defensive guard for setup
+        _LOGGER.exception("Failed to load students for todo: %s", err)
+        return
+
     entities: list[TodoListEntity] = []
-
-    # Debug: Prüfe ob Schüler vorhanden
-    _LOGGER.debug("Students available: %s", client.get_students())
-
-    for st in client.get_students():
-        sid = st["id"]
-        name = st["name"]
+    for st in students:
+        if not isinstance(st, dict):
+            _LOGGER.debug("Skip non-dict student entry: %r", st)
+            continue
+        sid = st.get("id")
+        name = st.get("name")
+        if not sid or not name:
+            _LOGGER.debug("Skip student with missing id/name: %r", st)
+            continue
         slug = normalize_student_slug(name)
 
         _LOGGER.debug("Creating todo entity for student %s (ID: %s)", name, sid)
@@ -98,7 +117,7 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         _LOGGER.info(
             "HomeworkTodoList %s (student %s) added to hass, subscribing to coordinator",
             self._attr_unique_id,
-            self.student_id
+            self.student_id,
         )
         await super().async_added_to_hass()
         # Force an immediate update to make sure entity receives current data

@@ -44,6 +44,7 @@ class SchulmanagerClient:
         password: str,
         debug_dumps: bool = False,
         institution_id: int | None = None,
+        user_id: int | None = None,
     ) -> None:
         """Initialize the service client with credentials and HA context."""
         self.hass = hass
@@ -56,6 +57,7 @@ class SchulmanagerClient:
         self.debug_dumps = debug_dumps
         self.data: dict[str, Any] | None = None
         self._institution_id: int | None = institution_id
+        self._user_id: int | None = user_id
         self._multiple_accounts: list[dict[str, Any]] | None = None
 
     async def _dump(self, name: str, data: Any) -> None:
@@ -123,6 +125,10 @@ class SchulmanagerClient:
         """Return the institution ID if available."""
         return self._institution_id
 
+    def get_user_id(self) -> int | None:
+        """Return the user ID if available."""
+        return self._user_id
+
     def get_multiple_accounts(self) -> list[dict[str, Any]] | None:
         """Return multiple accounts if available from login response."""
         return getattr(self, "_multiple_accounts", None)
@@ -134,7 +140,11 @@ class SchulmanagerClient:
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json;charset=UTF-8",
         }
-        payload = {"emailOrUsername": email, "userId": None, "institutionId": None}
+        payload = {
+            "emailOrUsername": email,
+            "userId": self._user_id,
+            "institutionId": self._institution_id,
+        }
 
         await self._dump(
             "get_salt_request.json",
@@ -183,7 +193,7 @@ class SchulmanagerClient:
             "password": self.password,
             "hash": hash_hex,
             "mobileApp": False,
-            "userId": None,
+            "userId": self._user_id,
             "twoFactorCode": None,
             "institutionId": self._institution_id,
         }
@@ -231,6 +241,9 @@ class SchulmanagerClient:
 
             self._token = data["jwt"]
             user = data.get("user") or {}
+
+            if self._user_id is None and user.get("id") is not None:
+                self._user_id = user.get("id")
 
             # Extract and store institutionId if not already set
             if self._institution_id is None:
@@ -1550,23 +1563,85 @@ class MultiSchoolClient:
         """
         _LOGGER.info("Logging into %d schools in parallel", len(schools))
 
+        def _build_login_candidates(school: dict[str, Any]) -> list[dict[str, int | None]]:
+            """Build possible login parameter combinations from a school record."""
+            inst_ids: list[int] = []
+            user_ids: list[int] = []
+
+            def _add_unique(target: list[int], value: Any) -> None:
+                if isinstance(value, str) and value.isdigit():
+                    value = int(value)
+                if isinstance(value, int) and value not in target:
+                    target.append(value)
+
+            _add_unique(inst_ids, school.get("institutionId"))
+            _add_unique(inst_ids, school.get("institution_id"))
+            _add_unique(user_ids, school.get("userId"))
+            _add_unique(user_ids, school.get("user_id"))
+
+            raw_id = school.get("id")
+            _add_unique(user_ids, raw_id)
+            if not inst_ids:
+                _add_unique(inst_ids, raw_id)
+
+            combos: list[dict[str, int | None]] = []
+            for inst in inst_ids:
+                combos.append({"institution_id": inst, "user_id": None})
+            for user in user_ids:
+                combos.append({"institution_id": None, "user_id": user})
+            for inst in inst_ids:
+                for user in user_ids:
+                    combos.append({"institution_id": inst, "user_id": user})
+
+            # Deduplicate
+            seen: set[tuple[int | None, int | None]] = set()
+            unique: list[dict[str, int | None]] = []
+            for c in combos:
+                key = (c["institution_id"], c["user_id"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique.append(c)
+            return unique
+
         async def login_to_school(school: dict[str, Any]) -> tuple[int, str, SchulmanagerClient]:
             """Login to a single school and return client."""
-            school_id = school["id"]
-            school_name = school["label"]
+            school_name = school.get("label") or "Schule"
+            candidates = _build_login_candidates(school)
+            if not candidates:
+                raise RuntimeError("No login candidates for school")
 
-            _LOGGER.debug("Logging into school: %s (ID: %d)", school_name, school_id)
+            last_err: Exception | None = None
+            for params in candidates:
+                inst_id = params["institution_id"]
+                user_id = params["user_id"]
+                _LOGGER.debug(
+                    "Logging into school: %s (institution_id=%s, user_id=%s)",
+                    school_name,
+                    inst_id,
+                    user_id,
+                )
+                client = SchulmanagerClient(
+                    self.hass,
+                    self.username,
+                    self.password,
+                    debug_dumps=self.debug_dumps,
+                    institution_id=inst_id,
+                    user_id=user_id,
+                )
+                try:
+                    await client.async_login()
+                except Exception as err:  # noqa: BLE001 - try other variants
+                    last_err = err
+                    continue
 
-            client = SchulmanagerClient(
-                self.hass,
-                self.username,
-                self.password,
-                debug_dumps=self.debug_dumps,
-                institution_id=school_id,
-            )
+                if client.has_token():
+                    school_key = inst_id if inst_id is not None else (user_id or 0)
+                    return school_key, school_name, client
 
-            await client.async_login()
-            return school_id, school_name, client
+                last_err = RuntimeError("Login returned no token")
+
+            raise RuntimeError(f"Login failed for {school_name}: {last_err!r}")
 
         # Login to all schools in parallel
         login_tasks = [login_to_school(school) for school in schools]

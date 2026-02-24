@@ -1,5 +1,19 @@
 # Schulmanager Integration – Changelog
 
+## 0.7.0 (2026-02-24)
+
+### ✨ Verbesserungen
+- **Multi‑School Login zuverlässiger**
+  - Stabilere Anmeldung bei Konten mit mehreren Schulen
+
+- **„Tage bis zur nächsten Arbeit“ genauer**
+  - Schulweite Termine werden nicht mehr mitgezählt
+
+### 📝 Hinweise
+- Keine
+
+---
+
 ## 0.6.1 (2026-02-24)
 
 ### ✨ Features

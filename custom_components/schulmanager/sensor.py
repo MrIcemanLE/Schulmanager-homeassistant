@@ -1302,6 +1302,8 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
                 integ.get("exams", {}).get(self.student_id, []) or [],
             )
         )
+        # Only consider regular exams; exclude school-wide events
+        items = [exam for exam in items if not exam.get("_isCalendarEvent")]
         if not items:
             return None
 
@@ -1354,6 +1356,8 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
                 integ.get("exams", {}).get(self.student_id, []) or [],
             )
         )
+        # Only consider regular exams; exclude school-wide events
+        items = [exam for exam in items if not exam.get("_isCalendarEvent")]
         if not items:
             return {
                 "next_exam": None,

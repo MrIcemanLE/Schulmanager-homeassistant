@@ -48,9 +48,33 @@ async def async_setup_entry(
         opts.get(OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT, False)
     )
 
-    for st in client.get_students():
-        sid = st["id"]
-        name = st["name"]
+    # Load students robustly (prefer get_all_students for multi-school clients)
+    try:
+        if hasattr(client, "get_all_students"):
+            students = client.get_all_students()
+        elif hasattr(client, "get_students"):
+            _LOGGER.warning(
+                "Using deprecated get_students(); please migrate client to get_all_students()"
+            )
+            students = client.get_students()
+        else:
+            _LOGGER.error(
+                "Client has neither get_all_students() nor get_students(); aborting calendar setup"
+            )
+            return
+    except Exception as err:  # noqa: BLE001 - defensive guard for setup
+        _LOGGER.exception("Failed to load students for calendar: %s", err)
+        return
+
+    for st in students:
+        if not isinstance(st, dict):
+            _LOGGER.debug("Skip non-dict student entry: %r", st)
+            continue
+        sid = st.get("id")
+        name = st.get("name")
+        if not sid or not name:
+            _LOGGER.debug("Skip student with missing id/name: %r", st)
+            continue
         slug = normalize_student_slug(name)
         # Exams calendars
         entities.append(ExamsCalendar(client, coord, sid, name, slug))
@@ -215,53 +239,46 @@ class ExamCalendarBase(CalendarEntity):
 
     def _generate_exam_summary(self, exam: dict) -> str:
         """Generate summary text for exam event."""
-        # Get exam type (Test, Klausur, etc.)
-        exam_type = "Prüfung"
-        if "type" in exam and "name" in exam["type"]:
-            exam_type = exam["type"]["name"]
-
-        # Get subject name
-        subject_name = "Unbekanntes Fach"
-        if "subject" in exam:
-            if "abbreviation" in exam["subject"]:
-                subject_name = exam["subject"]["abbreviation"]
-            elif "name" in exam["subject"]:
-                subject_name = exam["subject"]["name"]
-
-        # Format: "Test EN" or "Klausur Mathematik"
+        t = exam.get("type") or {}
+        s = exam.get("subject") or {}
+        exam_type = t.get("name", "Prüfung")
+        subject_name = s.get("abbreviation") or s.get("name") or "Unbekanntes Fach"
         return f"{exam_type} {subject_name}"
 
     def _generate_exam_description(self, exam: dict) -> str:
         """Generate description text for exam event."""
-        description_parts = []
+        parts: list[str] = []
 
-        # Add subject details
-        if "subject" in exam and "name" in exam["subject"]:
-            description_parts.append(f"Fach: {exam['subject']['name']}")
+        s = exam.get("subject") or {}
+        t = exam.get("type") or {}
 
-        # Add exam type with color if available
-        if "type" in exam:
-            type_info = exam["type"]["name"]
-            if "color" in exam["type"]:
-                type_info += f" ({exam['type']['color']})"
-            description_parts.append(f"Art: {type_info}")
+        subj_name = s.get("name")
+        if subj_name:
+            parts.append(f"Fach: {subj_name}")
 
-        # Add comment/topic if available
-        if exam.get("comment"):
-            description_parts.append(f"Thema: {exam['comment']}")
+        type_name = t.get("name")
+        if type_name:
+            type_info = type_name
+            tcolor = t.get("color")
+            if tcolor:
+                type_info += f" ({tcolor})"
+            parts.append(f"Art: {type_info}")
 
-        # Add class hour info if available
-        if "startClassHour" in exam:
-            hour_info = exam["startClassHour"]
-            if "number" in hour_info:
-                time_info = f"Stunde {hour_info['number']}"
-                if "from" in hour_info and "until" in hour_info:
-                    time_info += (
-                        f" ({hour_info['from'][:5]} - {hour_info['until'][:5]})"
-                    )
-                description_parts.append(f"Zeit: {time_info}")
+        comment = exam.get("comment")
+        if comment:
+            parts.append(f"Thema: {comment}")
 
-        return "\n".join(description_parts)
+        hour_info = exam.get("startClassHour") or {}
+        number = hour_info.get("number")
+        if number is not None:
+            time_info = f"Stunde {number}"
+            hour_from = hour_info.get("from")
+            hour_until = hour_info.get("until")
+            if hour_from and hour_until:
+                time_info += f" ({str(hour_from)[:5]} - {str(hour_until)[:5]})"
+            parts.append(f"Zeit: {time_info}")
+
+        return "\n".join(parts)
 
     @property
     def device_info(self) -> DeviceInfo:
