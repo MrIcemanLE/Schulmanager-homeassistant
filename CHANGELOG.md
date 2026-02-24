@@ -1,5 +1,21 @@
 # Schulmanager Integration – Changelog
 
+## 0.6.1 (2026-02-24)
+
+### ✨ Features
+- **Schulweite Events in eigenem Kalender**
+  - Neuer Kalender `calendar.<schüler>_schultermine` für schulweite Events (z.B. Schulball, BLF, Projektwochen)
+  - Der Arbeiten‑Kalender enthält jetzt nur noch reguläre Klassenarbeiten/Klausuren
+
+### 🐛 Bugfixes
+- **API wieder funktionsfähig trotz Website‑Änderung**
+  - Fallback für `bundleVersion`, damit die API‑Calls wieder zuverlässig funktionieren
+
+### ⚠️ Hinweise
+- Nach dem Update Home Assistant neu starten, damit die neuen Kalender‑Entitäten angelegt werden
+
+---
+
 ## 0.6.0 (2025-10-29)
 
 ### 🎯 Wichtige Verbesserungen

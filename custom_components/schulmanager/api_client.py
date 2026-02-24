@@ -66,6 +66,8 @@ class SchulmanagerClient:
         if "response" not in lname:
             return
         base = Path(self.hass.config.path("custom_components", "schulmanager", "debug"))
+        if self._institution_id is not None:
+            base = base / f"school_{self._institution_id}"
         file_path = base / name
 
         def _write() -> None:
@@ -357,7 +359,17 @@ class SchulmanagerClient:
                 _LOGGER.debug("Error processing script %s: %s", url, e)
                 continue
 
-        return None
+        # Fallback: Use dummy bundleVersion if discovery fails
+        # Based on https://github.com/Alpakat/schulmanager-online-api-client
+        # The API accepts dummy values when the actual version cannot be determined
+        dummy_version = "0000000000"
+        _LOGGER.info(
+            "Could not discover bundleVersion from JavaScript files, using dummy value '%s'. "
+            "This is expected and should work fine.",
+            dummy_version
+        )
+        self._bundle_version = dummy_version
+        return dummy_version
 
     async def _api_call(
         self, module: str, endpoint: str, parameters: dict, tag: str
@@ -471,10 +483,8 @@ class SchulmanagerClient:
             _LOGGER.warning("Student info not found for ID %s", student_id)
             return []
 
-        # Get bundle version
+        # Get bundle version (with fallback to dummy value)
         bundle_version = await self._discover_bundle_version()
-        if not bundle_version:
-            raise RuntimeError("Could not discover bundle version")
 
         # Calculate date range based on user preferences
         today = dt_util.now().date()
@@ -501,10 +511,13 @@ class SchulmanagerClient:
             "classId": student_info.get("classId", 0)
         }
 
-        # Create request payload using the proper exams API
+        # Create request payload with BOTH get-exams AND calendar events (school-wide)
+        # The website queries two data sources:
+        # 1. get-exams: Normal class exams
+        # 2. calendar/events: School-wide events (BLF, school events, etc.)
         batch_payload = {
-            "bundleVersion": bundle_version,
             "requests": [
+                # Regular exams
                 {
                     "moduleName": "exams",
                     "endpointName": "get-exams",
@@ -513,9 +526,48 @@ class SchulmanagerClient:
                         "start": start_date.isoformat(),
                         "end": end_date.isoformat()
                     }
+                },
+                # School-wide events (BLF, school events, etc.)
+                {
+                    "moduleName": "exams",
+                    "endpointName": "poqa",
+                    "parameters": {
+                        "action": {
+                            "model": "modules/calendar/event",
+                            "action": "findAll",
+                            "parameters": [
+                                {
+                                    "where": {
+                                        "start": {"$lte": (end_date + timedelta(days=1)).isoformat() + "T00:00:00.000Z"},
+                                        "end": {"$gte": (start_date - timedelta(days=1)).isoformat() + "T00:00:00.000Z"}
+                                    },
+                                    "include": [
+                                        {
+                                            "association": "visibleForGroups",
+                                            "required": True,
+                                            "attributes": ["id"],
+                                            "include": [
+                                                {
+                                                    "association": "students",
+                                                    "required": True,
+                                                    "attributes": ["id"],
+                                                    "where": {"id": int(student_id)}
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        "uiState": "main.modules.exams.view"
+                    }
                 }
             ]
         }
+
+        # Add bundleVersion only if available
+        if bundle_version:
+            batch_payload["bundleVersion"] = bundle_version
 
         # Make API call
         sess = async_get_clientsession(self.hass)
@@ -538,17 +590,63 @@ class SchulmanagerClient:
                 "data": response_data
             })
 
-            # Parse response
+            # Parse both responses
             results = response_data.get("results", [])
-            for result in results:
-                if result.get("status") == 200 and "data" in result:
-                    exams = result["data"]
-                    if isinstance(exams, list):
-                        _LOGGER.debug("Found %d exams for student %s", len(exams), student_id)
-                        return exams
+            all_exams = []
 
-            _LOGGER.debug("No exams found for student %s", student_id)
-            return []
+            # Result 0: Regular exams from get-exams
+            if len(results) > 0 and results[0].get("status") == 200:
+                regular_exams = results[0].get("data", [])
+                if isinstance(regular_exams, list):
+                    all_exams.extend(regular_exams)
+                    _LOGGER.debug("Found %d regular exams for student %s", len(regular_exams), student_id)
+
+            # Result 1: Calendar events (BLF, school-wide events)
+            if len(results) > 1 and results[1].get("status") == 200:
+                calendar_events = results[1].get("data", [])
+                if isinstance(calendar_events, list):
+                    # Convert calendar events to exam format
+                    for event in calendar_events:
+                        # Parse ISO datetime to get date and time
+                        start_dt = dt_util.parse_datetime(event.get("start", ""))
+                        end_dt = dt_util.parse_datetime(event.get("end", ""))
+
+                        if start_dt:
+                            # Convert calendar event to exam format
+                            exam_event = {
+                                "id": event.get("id"),
+                                "date": start_dt.date().isoformat(),
+                                "subject": {
+                                    "name": event.get("summary", "Prüfung"),
+                                    "abbreviation": event.get("summary", "")[:3].upper()
+                                },
+                                "subjectText": event.get("summary"),
+                                "comment": event.get("description"),
+                                "type": {
+                                    "name": "Schul-Event",
+                                    "color": "#ff0000",
+                                    "visibleForStudents": True
+                                },
+                                "startClassHour": {
+                                    "from": start_dt.strftime("%H:%M:%S"),
+                                    "until": end_dt.strftime("%H:%M:%S") if end_dt else start_dt.strftime("%H:%M:%S"),
+                                    "number": "X"
+                                },
+                                "endClassHour": {
+                                    "from": end_dt.strftime("%H:%M:%S") if end_dt else start_dt.strftime("%H:%M:%S"),
+                                    "until": end_dt.strftime("%H:%M:%S") if end_dt else start_dt.strftime("%H:%M:%S"),
+                                    "number": "X"
+                                },
+                                "createdAt": event.get("createdAt"),
+                                "updatedAt": event.get("updatedAt"),
+                                "_isCalendarEvent": True  # Flag to identify source
+                            }
+                            all_exams.append(exam_event)
+
+                    _LOGGER.debug("Found %d calendar exam events for student %s", len(calendar_events), student_id)
+
+            _LOGGER.debug("Total %d exams (regular + calendar) for student %s", len(all_exams), student_id)
+            return all_exams
 
 
 
@@ -579,10 +677,8 @@ class SchulmanagerClient:
                 "changes": {"today": [], "tomorrow": [], "summary": "Keine Stundenplanänderungen für heute und morgen"},
             }
 
-        # Get bundle version
+        # Get bundle version (with fallback to dummy value)
         bundle_version = await self._discover_bundle_version()
-        if not bundle_version:
-            raise RuntimeError("Could not discover bundle version")
 
         # Calculate range: current week plus N-1 upcoming weeks
         start_of_week = today - timedelta(days=today.weekday())
@@ -592,7 +688,6 @@ class SchulmanagerClient:
 
         # Create request payload exactly like the browser
         batch_payload = {
-            "bundleVersion": bundle_version,
             "requests": [
                 {
                     "moduleName": "schedules",
@@ -624,6 +719,10 @@ class SchulmanagerClient:
                 }
             ]
         }
+
+        # Add bundleVersion only if available
+        if bundle_version:
+            batch_payload["bundleVersion"] = bundle_version
 
         # Make single batch API call
         sess = async_get_clientsession(self.hass)
@@ -934,7 +1033,6 @@ class SchulmanagerClient:
         await ensure_authenticated(self)
 
         request_data = {
-            "bundleVersion": self._bundle_version or "7aa63feca5",
             "requests": [{
                 "moduleName": "grades",
                 "endpointName": "poqa",
@@ -950,6 +1048,10 @@ class SchulmanagerClient:
                 }
             }]
         }
+
+        # Add bundleVersion only if available
+        if self._bundle_version:
+            request_data["bundleVersion"] = self._bundle_version
 
         session = async_get_clientsession(self.hass)
         headers = common_headers()
@@ -1101,10 +1203,8 @@ class SchulmanagerClient:
         """Fetch grades for a student using the proper grades API."""
         sid = int(student_id)
 
-        # Get bundle version
+        # Get bundle version (with fallback to dummy value)
         bundle_version = await self._discover_bundle_version()
-        if not bundle_version:
-            raise RuntimeError("Could not discover bundle version")
 
         # Calculate full academic year range (August to July)
         today = dt_util.now().date()
@@ -1123,7 +1223,6 @@ class SchulmanagerClient:
 
         # Create request payload exactly like the browser
         grades_payload = {
-            "bundleVersion": bundle_version,
             "requests": [
                 {
                     "moduleName": "grades",
@@ -1138,6 +1237,10 @@ class SchulmanagerClient:
                 }
             ]
         }
+
+        # Add bundleVersion only if available
+        if bundle_version:
+            grades_payload["bundleVersion"] = bundle_version
 
         sess = async_get_clientsession(self.hass)
         headers = common_headers() | {
@@ -1470,9 +1573,19 @@ class MultiSchoolClient:
         results = await asyncio.gather(*login_tasks, return_exceptions=True)
 
         # Process results
-        for result in results:
+        summary: list[dict[str, Any]] = []
+
+        for school, result in zip(schools, results, strict=True):
             if isinstance(result, Exception):
                 _LOGGER.error("Failed to login to school: %s", result)
+                summary.append(
+                    {
+                        "school_id": school.get("id"),
+                        "school_name": school.get("label"),
+                        "status": "error",
+                        "error": repr(result),
+                    }
+                )
                 continue
 
             school_id, school_name, client = result
@@ -1492,12 +1605,26 @@ class MultiSchoolClient:
                 school_name,
                 len(students),
             )
+            masked_student_ids = [
+                self._mask_identifier(student.get("id")) for student in students
+            ]
+            summary.append(
+                {
+                    "school_id": school_id,
+                    "school_name": school_name,
+                    "status": "success",
+                    "student_count": len(students),
+                    "student_ids": masked_student_ids,
+                }
+            )
 
         _LOGGER.info(
             "Multi-school login complete: %d schools, %d total students",
             len(self.clients),
             len(self._all_students),
         )
+
+        await self._dump_summary("multi_school_login_summary.json", summary)
 
     def get_all_students(self) -> list[dict[str, Any]]:
         """Return all students from all schools with school information."""
@@ -1557,3 +1684,42 @@ class MultiSchoolClient:
                     result[key].update(client_result[key])
 
         return result
+
+    @staticmethod
+    def _mask_identifier(raw_value: Any) -> str:
+        """Return a privacy-safe representation of an identifier."""
+        if raw_value is None:
+            return ""
+
+        value = str(raw_value)
+        if not value:
+            return ""
+
+        if len(value) <= 4:
+            return "***"
+
+        return f"{value[0]}***{value[-1]}"
+
+    async def _dump_summary(self, filename: str, entries: list[dict[str, Any]]) -> None:
+        """Write multi-school debug summary if dumps are enabled."""
+        if not self.debug_dumps:
+            return
+
+        base = Path(self.hass.config.path("custom_components", "schulmanager", "debug"))
+        file_path = base / filename
+
+        def _write() -> None:
+            base.mkdir(parents=True, exist_ok=True)
+            with file_path.open("w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "fetched_at": dt_util.utcnow().isoformat(),
+                        "entries": entries,
+                        "total_students": len(self._all_students),
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+
+        await self.hass.async_add_executor_job(_write)

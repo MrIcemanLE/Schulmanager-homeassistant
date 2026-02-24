@@ -52,8 +52,9 @@ async def async_setup_entry(
         sid = st["id"]
         name = st["name"]
         slug = normalize_student_slug(name)
-        # Exams calendar
+        # Exams calendars
         entities.append(ExamsCalendar(client, coord, sid, name, slug))
+        entities.append(SchoolEventsCalendar(client, coord, sid, name, slug))
         # Schedule calendar (optional)
         if enable_schedule:
             entities.append(
@@ -65,8 +66,8 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class ExamsCalendar(CalendarEntity):
-    """Calendar entity for student exams."""
+class ExamCalendarBase(CalendarEntity):
+    """Base calendar entity for student exams."""
 
     _attr_has_entity_name = False
 
@@ -77,6 +78,9 @@ class ExamsCalendar(CalendarEntity):
         student_id: str,
         student_name: str,
         slug: str,
+        unique_suffix: str,
+        name_suffix: str,
+        icon: str,
     ) -> None:
         """Initialize the calendar entity."""
         self.hub = client
@@ -84,64 +88,80 @@ class ExamsCalendar(CalendarEntity):
         self.student_id = student_id
         self.student_name = student_name
         # Stable unique ID based on immutable student ID
-        self._attr_unique_id = f"schulmanager_{self.student_id}_exams"
+        self._attr_unique_id = f"schulmanager_{self.student_id}_{unique_suffix}"
         # Full name with student for clarity
-        self._attr_name = f"{self.student_name} Arbeiten"
-        self._attr_icon = "mdi:book-education"
+        self._attr_name = f"{self.student_name} {name_suffix}"
+        self._attr_icon = icon
 
+    def _matches_exam(self, exam: dict[str, Any]) -> bool:
+        """Return True if an exam entry belongs to this calendar."""
+        return True
 
+    def _iter_exam_items(self, data: dict[str, Any]) -> list[dict[str, Any]]:
+        """Filter exam items for this calendar."""
+        items = data.get("exams", {}).get(self.student_id, [])
+        return [exam for exam in items if self._matches_exam(exam)]
+
+    def _parse_exam_date(self, exam: dict[str, Any]) -> datetime | None:
+        """Parse the exam date into a local date."""
+        exam_date = exam.get("date")
+        if not exam_date:
+            return None
+
+        try:
+            if "T" in exam_date:
+                return datetime.fromisoformat(exam_date)
+            return datetime.fromisoformat(exam_date)
+        except (ValueError, TypeError):
+            try:
+                return datetime.strptime(exam_date, "%Y-%m-%d")
+            except (ValueError, TypeError):
+                return None
+
+    def _exam_times(self, exam: dict[str, Any]) -> tuple[datetime, datetime] | None:
+        """Return start/end times for an exam event."""
+        parsed = self._parse_exam_date(exam)
+        if not parsed:
+            return None
+        date_str = parsed.date().isoformat()
+
+        # Create start time based on class hour if available
+        if "startClassHour" in exam:
+            try:
+                hour_from = exam["startClassHour"].get("from", "08:00:00")
+                hour_until = exam["startClassHour"].get("until", "09:00:00")
+
+                start_time = datetime.strptime(
+                    f"{date_str} {hour_from}", "%Y-%m-%d %H:%M:%S"
+                )
+                end_time = datetime.strptime(
+                    f"{date_str} {hour_until}", "%Y-%m-%d %H:%M:%S"
+                )
+
+                # Make timezone aware
+                start_time = dt_util.as_local(start_time)
+                end_time = dt_util.as_local(end_time)
+                return start_time, end_time
+            except (ValueError, TypeError):
+                pass
+
+        # All-day event fallback
+        start_time = dt_util.start_of_local_day(parsed.date())
+        end_time = start_time + timedelta(days=1)
+        return start_time, end_time
 
     @property
     def event(self) -> CalendarEvent | None:
         """Return the next upcoming exam event."""
         data = cast(dict[str, Any], self.coordinator.data)
-        items = data.get("exams", {}).get(self.student_id, [])
+        items = self._iter_exam_items(data)
         now = dt_util.now()
 
         for exam in items:
-            # Handle exam data structure from API
-            exam_date = exam.get("date")
-            if not exam_date:
+            times = self._exam_times(exam)
+            if not times:
                 continue
-
-            try:
-                # Parse the date (should be YYYY-MM-DD format)
-                if "T" in exam_date:
-                    d = datetime.fromisoformat(exam_date).date()
-                else:
-                    d = datetime.fromisoformat(exam_date).date()
-            except (ValueError, TypeError):
-                try:
-                    d = datetime.strptime(exam_date, "%Y-%m-%d").date()
-                except (ValueError, TypeError):
-                    continue
-
-            # Create start time based on class hour if available
-            start_time = None
-            end_time = None
-            if "startClassHour" in exam:
-                try:
-                    hour_from = exam["startClassHour"].get("from", "08:00:00")
-                    hour_until = exam["startClassHour"].get("until", "09:00:00")
-
-                    start_time = datetime.strptime(
-                        f"{exam_date} {hour_from}", "%Y-%m-%d %H:%M:%S"
-                    )
-                    end_time = datetime.strptime(
-                        f"{exam_date} {hour_until}", "%Y-%m-%d %H:%M:%S"
-                    )
-
-                    # Make timezone aware
-                    start_time = dt_util.as_local(start_time)
-                    end_time = dt_util.as_local(end_time)
-                except (ValueError, TypeError):
-                    # Fall back to all-day event
-                    start_time = dt_util.start_of_local_day(d)
-                    end_time = start_time + timedelta(days=1)
-            else:
-                # All-day event
-                start_time = dt_util.start_of_local_day(d)
-                end_time = start_time + timedelta(days=1)
+            start_time, end_time = times
 
             # Return the next upcoming exam
             if end_time >= now:
@@ -165,53 +185,14 @@ class ExamsCalendar(CalendarEntity):
     ) -> list[CalendarEvent]:
         """Get events in a specific date range."""
         data = cast(dict[str, Any], self.coordinator.data)
-        items = data.get("exams", {}).get(self.student_id, [])
+        items = self._iter_exam_items(data)
         out: list[CalendarEvent] = []
 
         for exam in items:
-            # Handle exam data structure from API
-            exam_date = exam.get("date")
-            if not exam_date:
+            times = self._exam_times(exam)
+            if not times:
                 continue
-
-            try:
-                # Parse the date (should be YYYY-MM-DD format)
-                if "T" in exam_date:
-                    d = datetime.fromisoformat(exam_date).date()
-                else:
-                    d = datetime.fromisoformat(exam_date).date()
-            except (ValueError, TypeError):
-                try:
-                    d = datetime.strptime(exam_date, "%Y-%m-%d").date()
-                except (ValueError, TypeError):
-                    continue
-
-            # Create start time based on class hour if available
-            start_time = None
-            end_time = None
-            if "startClassHour" in exam:
-                try:
-                    hour_from = exam["startClassHour"].get("from", "08:00:00")
-                    hour_until = exam["startClassHour"].get("until", "09:00:00")
-
-                    start_time = datetime.strptime(
-                        f"{exam_date} {hour_from}", "%Y-%m-%d %H:%M:%S"
-                    )
-                    end_time = datetime.strptime(
-                        f"{exam_date} {hour_until}", "%Y-%m-%d %H:%M:%S"
-                    )
-
-                    # Make timezone aware
-                    start_time = dt_util.as_local(start_time)
-                    end_time = dt_util.as_local(end_time)
-                except (ValueError, TypeError):
-                    # Fall back to all-day event
-                    start_time = dt_util.start_of_local_day(d)
-                    end_time = start_time + timedelta(days=1)
-            else:
-                # All-day event
-                start_time = dt_util.start_of_local_day(d)
-                end_time = start_time + timedelta(days=1)
+            start_time, end_time = times
 
             # Check if event is in requested range
             if end_time < start_date or start_time > end_date:
@@ -299,6 +280,89 @@ class ExamsCalendar(CalendarEntity):
     def available(self) -> bool:
         """Return if entity is available."""
         return bool(self.coordinator.last_update_success)
+
+
+class ExamsCalendar(ExamCalendarBase):
+    """Calendar entity for student exams."""
+
+    def __init__(
+        self,
+        client: Any,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        slug: str,
+    ) -> None:
+        """Initialize the calendar entity."""
+        super().__init__(
+            client,
+            coordinator,
+            student_id,
+            student_name,
+            slug,
+            unique_suffix="exams",
+            name_suffix="Arbeiten",
+            icon="mdi:book-education",
+        )
+
+    def _matches_exam(self, exam: dict[str, Any]) -> bool:
+        """Return True for regular exams only."""
+        return not bool(exam.get("_isCalendarEvent"))
+
+
+class SchoolEventsCalendar(ExamCalendarBase):
+    """Calendar entity for school-wide events."""
+
+    def __init__(
+        self,
+        client: Any,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        slug: str,
+    ) -> None:
+        """Initialize the calendar entity."""
+        super().__init__(
+            client,
+            coordinator,
+            student_id,
+            student_name,
+            slug,
+            unique_suffix="school_events",
+            name_suffix="Schultermine",
+            icon="mdi:calendar-star",
+        )
+
+    def _matches_exam(self, exam: dict[str, Any]) -> bool:
+        """Return True for block exams only."""
+        return bool(exam.get("_isCalendarEvent"))
+
+    def _generate_exam_summary(self, exam: dict) -> str:
+        """Generate summary text for school-wide events."""
+        subject = exam.get("subject", {}) or {}
+        summary = exam.get("subjectText") or subject.get("name") or "Schultermin"
+        return str(summary)
+
+    def _generate_exam_description(self, exam: dict) -> str:
+        """Generate description text for school-wide events."""
+        description_parts = []
+
+        if exam.get("comment"):
+            description_parts.append(f"Beschreibung: {exam['comment']}")
+
+        if "startClassHour" in exam:
+            hour_info = exam["startClassHour"]
+            if "number" in hour_info:
+                time_info = f"Stunde {hour_info['number']}"
+                if "from" in hour_info and "until" in hour_info:
+                    time_info += (
+                        f" ({hour_info['from'][:5]} - {hour_info['until'][:5]})"
+                    )
+                description_parts.append(f"Zeit: {time_info}")
+
+        if not description_parts:
+            return "Schulweiter Termin"
+        return "\n".join(description_parts)
 
 
 class ScheduleCalendar(CalendarEntity):
