@@ -10,10 +10,10 @@ from typing import TYPE_CHECKING, Any, cast
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 if TYPE_CHECKING:
-    from .api_client import MultiSchoolClient, SchulmanagerClient
+    from .api_client import SchulmanagerHubClient
 
 from .const import (
     DEFAULT_SCHEDULE_WEEKS,
@@ -31,25 +31,15 @@ from .utils import (
 _LOGGER = logging.getLogger(__name__)
 
 class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
-    """Coordinator for Schulmanager integration with cooldown support.
-
-    Supports both single-school (SchulmanagerClient) and multi-school
-    (MultiSchoolClient) configurations.
-    """
+    """Coordinator for Schulmanager integration with cooldown support."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        client: SchulmanagerClient | MultiSchoolClient,
+        client: SchulmanagerHubClient,
         config_entry: ConfigEntry,
     ) -> None:
-        """Initialize the coordinator with cooldown tracking.
-
-        Args:
-            hass: Home Assistant instance
-            client: SchulmanagerClient or MultiSchoolClient instance
-            config_entry: Config entry for this integration
-        """
+        """Initialize the coordinator with cooldown tracking."""
         # Get the update interval from config, with validation
         interval_hours = get_validated_auto_update_interval(config_entry)
         interval_seconds = interval_hours * 3600  # Convert hours to seconds
@@ -99,7 +89,12 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
             schedule_weeks,
             date_range_config,
         )
-        data = await self.client.async_update(enabled_features, date_range_config)
+        try:
+            data = await self.client.async_update(enabled_features, date_range_config)
+        except UpdateFailed:
+            raise
+        except Exception as err:
+            raise UpdateFailed(str(err)) from err
 
         # Detect new homework/grades after the first successful refresh only
         try:

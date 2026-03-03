@@ -15,7 +15,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.helpers import config_validation as cv
 
-from .api_client import MultiSchoolClient, SchulmanagerClient
+from .api_client import SchulmanagerHubClient
 from .const import (
     CONF_PASSWORD,
     CONF_USERNAME,
@@ -71,80 +71,36 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
         # Test the connection and get student data
         try:
             # Enable debug dumps during config flow to help diagnose login issues
-            hub = SchulmanagerClient(
+            hub = SchulmanagerHubClient(
                 self.hass,
                 username,
                 password,
                 debug_dumps=True,
             )
 
-            # Test login and get student data
+            # Single call handles both single- and multi-school detection automatically
             await hub.async_login()
 
-            # Check if multi-school account
-            multiple_accounts = hub.get_multiple_accounts()
-
-            if multiple_accounts:
-                # Multi-school account: Login to all schools automatically
-                _LOGGER.info(
-                    "Multi-school account detected with %d schools - logging into all",
-                    len(multiple_accounts),
-                )
-
-                # Create MultiSchoolClient and login to all schools
-                multi_client = MultiSchoolClient(
-                    self.hass,
-                    username,
-                    password,
-                    debug_dumps=True,
-                )
-
-                await multi_client.async_login_all_schools(multiple_accounts)
-
-                # Get all students from all schools
-                all_students = multi_client.get_all_students()
-
-                if not all_students:
-                    errors["base"] = "no_students"
-                else:
-                    _LOGGER.info(
-                        "Found %d total students across %d schools",
-                        len(all_students),
-                        len(multiple_accounts),
-                    )
-
-                    # Create entry with all schools
-                    return self.async_create_entry(
-                        title="Schulmanager Online",
-                        data={
-                            CONF_USERNAME: username,
-                            CONF_PASSWORD: password,
-                            "schools": multiple_accounts,  # Store all schools
-                        },
-                        options=DEFAULT_OPTIONS.copy(),
-                    )
-
+            if not hub.has_token():
+                errors["base"] = "invalid_auth"
             else:
-                # Single-school account (normal flow)
-                students = hub.get_students()
+                students = hub.get_all_students()
                 if not students:
                     errors["base"] = "no_students"
                 else:
-                    _LOGGER.info(
-                        "Single-school account: Found %s students: %s",
-                        len(students),
-                        [s["name"] for s in students],
-                    )
+                    _LOGGER.info("Found %d students", len(students))
 
-                    # Store institutionId if available (for backwards compatibility)
-                    institution_id = hub.get_institution_id()
-                    entry_data = {
+                    # Build entry data; store schools (multi-school) or institution_id (single-school)
+                    entry_data: dict[str, Any] = {
                         CONF_USERNAME: username,
                         CONF_PASSWORD: password,
                     }
-                    if institution_id is not None:
-                        entry_data["institution_id"] = institution_id
-                        _LOGGER.info("Stored institutionId %s", institution_id)
+                    detected_schools = hub.get_detected_schools()
+                    if detected_schools:
+                        entry_data["schools"] = detected_schools
+                    elif (inst_id := hub.get_institution_id()) is not None:
+                        entry_data["institution_id"] = inst_id
+                        _LOGGER.debug("Stored institutionId %s", inst_id)
 
                     return self.async_create_entry(
                         title="Schulmanager Online",
@@ -201,19 +157,25 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Validate new credentials
         try:
-            # Get existing institutionId if available
-            institution_id = None
+            # Reuse existing schools/institutionId from the stored entry if available
+            existing_schools = None
+            existing_inst_id = None
             if hasattr(self, "_reauth_entry") and self._reauth_entry:
-                institution_id = self._reauth_entry.data.get("institution_id")
+                existing_schools = self._reauth_entry.data.get("schools")
+                existing_inst_id = self._reauth_entry.data.get("institution_id")
 
-            hub = SchulmanagerClient(
+            hub = SchulmanagerHubClient(
                 self.hass,
                 user_input[CONF_USERNAME],
                 user_input[CONF_PASSWORD],
                 debug_dumps=False,
-                institution_id=institution_id,
             )
-            await hub.async_login()
+            await hub.async_login(
+                schools=existing_schools,
+                institution_id=existing_inst_id,
+            )
+            if not hub.has_token():
+                raise RuntimeError("Login succeeded but no token returned")
         except Exception:  # noqa: BLE001 - config flows intentionally swallow unknown errors to prompt retry
             errors["base"] = "invalid_auth"
             return self.async_show_form(
@@ -230,13 +192,15 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
         # Update the existing entry with new credentials
         assert hasattr(self, "_reauth_entry") and self._reauth_entry is not None
 
-        # Preserve institutionId if it exists
-        update_data = {
+        # Preserve existing schools/institutionId
+        update_data: dict[str, Any] = {
             CONF_USERNAME: user_input[CONF_USERNAME],
             CONF_PASSWORD: user_input[CONF_PASSWORD],
         }
-        if institution_id is not None:
-            update_data["institution_id"] = institution_id
+        if existing_schools is not None:
+            update_data["schools"] = existing_schools
+        elif existing_inst_id is not None:
+            update_data["institution_id"] = existing_inst_id
 
         self.hass.config_entries.async_update_entry(
             self._reauth_entry,

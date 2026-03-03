@@ -47,20 +47,8 @@ async def async_setup_entry(
             ", ".join(missing),
         )
         return
-    # Load students robustly (prefer get_all_students for multi-school clients)
     try:
-        if hasattr(client, "get_all_students"):
-            students = client.get_all_students()
-        elif hasattr(client, "get_students"):
-            _LOGGER.warning(
-                "Using deprecated get_students(); please migrate client to get_all_students()"
-            )
-            students = client.get_students()
-        else:
-            _LOGGER.error(
-                "Client has neither get_all_students() nor get_students(); aborting todo setup"
-            )
-            return
+        students = client.get_all_students()
     except Exception as err:  # noqa: BLE001 - defensive guard for setup
         _LOGGER.exception("Failed to load students for todo: %s", err)
         return

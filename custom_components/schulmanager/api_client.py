@@ -1426,6 +1426,14 @@ class SchulmanagerClient:
         # Make sure logged in and bundle known
         if not self._token:
             await self.async_login()
+        if not self._token:
+            # async_login() may return without a token for multi-school accounts
+            # (API returns multipleAccounts instead of JWT). Raise so the coordinator
+            # can mark the update as failed instead of silently returning empty data.
+            raise RuntimeError(
+                "Authentication failed: no token after login "
+                "(account may require institutionId – check integration configuration)"
+            )
         if not self._bundle_version:
             await self._discover_bundle_version()
 
@@ -1530,11 +1538,12 @@ class SchulmanagerClient:
         return result
 
 
-class MultiSchoolClient:
-    """Wrapper client for managing multiple schools in multi-school accounts.
+class SchulmanagerHubClient:
+    """Unified hub client for both single-school and multi-school Schulmanager accounts.
 
-    This client handles parallel login to multiple schools and aggregates
-    student data from all schools with school information attached.
+    Automatically detects the account type on first login and handles both cases
+    transparently. Single-school accounts use exactly one internal SchulmanagerClient;
+    multi-school accounts use one per school, with parallel login and aggregated data.
     """
 
     def __init__(
@@ -1544,23 +1553,69 @@ class MultiSchoolClient:
         password: str,
         debug_dumps: bool = False,
     ) -> None:
-        """Initialize multi-school client."""
+        """Initialize unified hub client."""
         self.hass = hass
         self.username = username
         self.password = password
         self.debug_dumps = debug_dumps
-        self.clients: dict[int, SchulmanagerClient] = {}  # school_id -> client
-        self.school_names: dict[int, str] = {}  # school_id -> school_name
+        self._clients: dict[Any, SchulmanagerClient] = {}  # key -> client
+        self._school_names: dict[Any, str] = {}  # key -> school name
         self._all_students: list[dict[str, Any]] = []
+        self._detected_schools: list[dict[str, Any]] | None = None
 
-    async def async_login_all_schools(
-        self, schools: list[dict[str, Any]]
+    async def async_login(
+        self,
+        schools: list[dict[str, Any]] | None = None,
+        institution_id: int | None = None,
     ) -> None:
-        """Login to all schools in parallel and collect students.
+        """Login to all schools.
 
-        Args:
-            schools: List of school dicts with 'id' and 'label' keys
+        Login priority:
+        1. If schools provided (stored in config entry) → login to each school directly.
+        2. Otherwise → probe login to auto-detect account type:
+           - JWT response → single-school, use the probe client directly.
+           - multipleAccounts response → multi-school, login to each detected school.
         """
+        if schools:
+            # Known schools from stored config – skip probe, login directly
+            await self._login_to_schools(schools)
+        else:
+            # Probe login: auto-detect single vs multi-school
+            probe = SchulmanagerClient(
+                self.hass,
+                self.username,
+                self.password,
+                debug_dumps=self.debug_dumps,
+                institution_id=institution_id,
+            )
+            await probe.async_login()
+
+            if probe.has_token():
+                # Single-school account
+                inst_key: Any = probe.get_institution_id() or institution_id or 0
+                self._clients[inst_key] = probe
+                self._school_names[inst_key] = ""
+                self._all_students = list(probe.get_students())
+                _LOGGER.debug(
+                    "Single-school account: %d students found",
+                    len(self._all_students),
+                )
+            else:
+                # Multi-school account detected from probe response
+                detected = probe.get_multiple_accounts() or []
+                if not detected:
+                    raise RuntimeError(
+                        "Login failed: no token and no multiple accounts in response"
+                    )
+                self._detected_schools = detected
+                _LOGGER.info(
+                    "Multi-school account detected with %d schools - logging into all",
+                    len(detected),
+                )
+                await self._login_to_schools(detected)
+
+    async def _login_to_schools(self, schools: list[dict[str, Any]]) -> None:
+        """Login to a list of schools in parallel and collect students."""
         _LOGGER.info("Logging into %d schools in parallel", len(schools))
 
         def _build_login_candidates(school: dict[str, Any]) -> list[dict[str, int | None]]:
@@ -1604,8 +1659,8 @@ class MultiSchoolClient:
                 unique.append(c)
             return unique
 
-        async def login_to_school(school: dict[str, Any]) -> tuple[int, str, SchulmanagerClient]:
-            """Login to a single school and return client."""
+        async def login_to_school(school: dict[str, Any]) -> tuple[Any, str, SchulmanagerClient]:
+            """Login to a single school and return (key, name, client)."""
             school_name = school.get("label") or "Schule"
             candidates = _build_login_candidates(school)
             if not candidates:
@@ -1636,7 +1691,7 @@ class MultiSchoolClient:
                     continue
 
                 if client.has_token():
-                    school_key = inst_id if inst_id is not None else (user_id or 0)
+                    school_key: Any = inst_id if inst_id is not None else (user_id or 0)
                     return school_key, school_name, client
 
                 last_err = RuntimeError("Login returned no token")
@@ -1664,8 +1719,8 @@ class MultiSchoolClient:
                 continue
 
             school_id, school_name, client = result
-            self.clients[school_id] = client
-            self.school_names[school_id] = school_name
+            self._clients[school_id] = client
+            self._school_names[school_id] = school_name
 
             # Collect students from this school and add school info
             students = client.get_students()
@@ -1695,31 +1750,50 @@ class MultiSchoolClient:
 
         _LOGGER.info(
             "Multi-school login complete: %d schools, %d total students",
-            len(self.clients),
+            len(self._clients),
             len(self._all_students),
         )
 
         await self._dump_summary("multi_school_login_summary.json", summary)
 
     def get_all_students(self) -> list[dict[str, Any]]:
-        """Return all students from all schools with school information."""
+        """Return all students with school context (school_name=None for single-school)."""
         return list(self._all_students)
 
-    def get_client(self, school_id: int) -> SchulmanagerClient | None:
-        """Get the client for a specific school ID."""
-        return self.clients.get(school_id)
+    def get_detected_schools(self) -> list[dict[str, Any]] | None:
+        """Return the schools list detected during probe login (for config storage).
 
-    def get_school_name(self, school_id: int) -> str:
-        """Get the school name for a specific school ID."""
-        return self.school_names.get(school_id, f"School {school_id}")
+        Returns None for single-school accounts or when schools were provided directly.
+        """
+        return self._detected_schools
+
+    def get_institution_id(self) -> int | None:
+        """Return institution ID for single-school accounts (for config storage)."""
+        if len(self._clients) == 1:
+            client = next(iter(self._clients.values()))
+            return client.get_institution_id()
+        return None
+
+    def get_client(self, school_id: Any) -> SchulmanagerClient | None:
+        """Get the internal client for a specific school key."""
+        return self._clients.get(school_id)
+
+    def get_school_name(self, school_id: Any) -> str:
+        """Get the school name for a specific school key."""
+        return self._school_names.get(school_id, f"School {school_id}")
 
     def has_token(self) -> bool:
-        """Return True if at least one client has a token."""
-        return any(client.has_token() for client in self.clients.values())
+        """Return True if at least one internal client has a token."""
+        return any(client.has_token() for client in self._clients.values())
 
     def has_bundle_version(self) -> bool:
-        """Return True if at least one client has bundle version."""
-        return any(client.has_bundle_version() for client in self.clients.values())
+        """Return True if at least one internal client has a bundle version."""
+        return any(client.has_bundle_version() for client in self._clients.values())
+
+    def clear_auth_cache(self) -> None:
+        """Clear auth cache for all internal clients."""
+        for client in self._clients.values():
+            client.clear_auth_cache()
 
     async def async_update(
         self,
@@ -1729,7 +1803,7 @@ class MultiSchoolClient:
         """Update data from all schools and aggregate results.
 
         Returns:
-            Aggregated data dict with students from all schools
+            Aggregated data dict with students from all schools.
         """
         result: dict[str, Any] = {
             "students": list(self._all_students),
@@ -1739,12 +1813,18 @@ class MultiSchoolClient:
             "grades": {},
         }
 
+        if not self._clients:
+            raise RuntimeError(
+                "No authenticated school clients available; "
+                "async_login() may have failed"
+            )
+
         # Update all clients in parallel
         async def update_client(client: SchulmanagerClient) -> dict[str, Any]:
             """Update a single client."""
             return await client.async_update(enabled_features, date_range_config)
 
-        update_tasks = [update_client(client) for client in self.clients.values()]
+        update_tasks = [update_client(client) for client in self._clients.values()]
         client_results = await asyncio.gather(*update_tasks, return_exceptions=True)
 
         # Aggregate results from all schools
@@ -1798,3 +1878,7 @@ class MultiSchoolClient:
                 )
 
         await self.hass.async_add_executor_job(_write)
+
+
+# Backward-compatibility alias – remove in a future version
+MultiSchoolClient = SchulmanagerHubClient

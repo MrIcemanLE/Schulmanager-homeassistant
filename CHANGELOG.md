@@ -1,5 +1,27 @@
 # Schulmanager Integration – Changelog
 
+## 0.8.0 (2026-03-03)
+
+### 🐛 Bugfixes
+- **Irreführende Warnung im Log behoben**
+  - Single-School-Nutzer sahen fälschlicherweise die Meldung: *"Using deprecated get_students(); please migrate client to get_all_students()"*
+  - Diese Warnung war falsch – `get_students()` ist für Single-School-Accounts die korrekte Methode
+  - Behoben in: `calendar.py`, `todo.py`
+
+- **Stiller Datenverlust nach HA-Neustart behoben**
+  - Problem: Nach einem Neustart von Home Assistant konnten in bestimmten Konstellationen alle Entitäten leer bleiben, ohne dass ein Fehler angezeigt wurde
+  - Ursache: Fehlgeschlagene Logins wurden intern still geschluckt; der Coordinator meldete fälschlicherweise „Erfolg" mit leeren Daten
+  - Lösung: Fehlgeschlagene Logins lösen jetzt sichtbare Fehler aus – Entitäten zeigen „Nicht verfügbar" statt falscher leerer Daten
+  - Behoben in: `api_client.py`, `coordinator.py`
+
+### 🔧 Verbesserungen (intern)
+- **Vereinheitlichte Client-Architektur**
+  - Single-School- und Multi-School-Login werden jetzt von einer einzigen Klasse verwaltet
+  - Keine sichtbare Verhaltensänderung – alle Entitäten und Funktionen bleiben identisch
+  - Verbessert die langfristige Wartbarkeit der Integration
+
+---
+
 ## 0.7.0 (2026-02-24)
 
 ### ✨ Verbesserungen
