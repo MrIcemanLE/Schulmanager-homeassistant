@@ -1,5 +1,16 @@
 # Schulmanager Integration – Changelog
 
+## 0.8.1 (2026-03-11)
+
+### 🐛 Bugfixes
+- **Stundenplan-Sensor zeigte fälschlicherweise „Schulfrei" bei Sonderstunden**
+  - Problem: Wenn für einen Schultag Sonderstunden ohne Raumangabe im Stundenplan hinterlegt waren (z.B. Exkursionen, Soziales Lernen), schlug der Datenabruf intern fehl
+  - Folge: Sowohl der heutige als auch der morgige Stundenplan-Sensor zeigten „Schulfrei", obwohl tatsächlich Unterricht oder Aktivitäten stattfanden
+  - Ursache: Ein JSON-`null`-Wert im Raumfeld (`"room": null`) wurde als Python-`None` übergeben, worauf dann `.get()` aufgerufen wurde → Absturz
+  - Lösung: Alle betroffenen Stellen nun null-sicher; `"room": null` wird korrekt als „kein Raum" behandelt
+
+---
+
 ## 0.8.0 (2026-03-03)
 
 ### 🐛 Bugfixes

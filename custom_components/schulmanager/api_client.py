@@ -899,6 +899,7 @@ class SchulmanagerClient:
             "substitution": "Vertretung",
             "cancelledLesson": "Entfall",
             "specialLesson": "Sonderstunde",
+            "changedLesson": "Geänderter Unterricht",
             "roomChange": "Raumänderung",
             "teacherChange": "Lehrervertretung",
             "irregularLesson": "Unregelmäßige Stunde",
@@ -913,7 +914,7 @@ class SchulmanagerClient:
             # Non-regular lessons are potential changes
             change_info = {
                 "type": change_types.get(lesson_type, lesson_type),
-                "hour": lesson.get("classHour", {}).get("number", "?"),
+                "hour": (lesson.get("classHour") or {}).get("number", "?"),
                 "date": lesson.get("date", ""),
                 "original_subject": "",
                 "new_subject": "",
@@ -930,19 +931,19 @@ class SchulmanagerClient:
                 original_lessons = lesson.get("originalLessons", [])
                 if original_lessons:
                     original = original_lessons[0]  # Take first original lesson
-                    change_info["original_subject"] = original.get("subject", {}).get("abbreviation", "")
+                    change_info["original_subject"] = (original.get("subject") or {}).get("abbreviation", "")
                     original_teachers = original.get("teachers", [])
                     if original_teachers:
                         change_info["original_teacher"] = original_teachers[0].get("abbreviation", "")
-                    change_info["original_room"] = original.get("room", {}).get("name", "")
+                    change_info["original_room"] = (original.get("room") or {}).get("name", "")
 
             # For special/substitute lessons, get new lesson info
             if actual_lesson:
-                change_info["new_subject"] = actual_lesson.get("subject", {}).get("abbreviation", "")
+                change_info["new_subject"] = (actual_lesson.get("subject") or {}).get("abbreviation", "")
                 new_teachers = actual_lesson.get("teachers", [])
                 if new_teachers:
                     change_info["new_teacher"] = new_teachers[0].get("abbreviation", "")
-                change_info["new_room"] = actual_lesson.get("room", {}).get("name", "")
+                change_info["new_room"] = (actual_lesson.get("room") or {}).get("name", "")
 
         # Check for room changes within regular lessons (if room seems unusual)
         # This could be enhanced with baseline data comparison in the future
