@@ -240,6 +240,7 @@ class SchulmanagerClient:
                 raise RuntimeError(f"login_failed:no_jwt:{resp.status}")
 
             self._token = data["jwt"]
+            _LOGGER.debug("Schulmanager: authentication successful")
             user = data.get("user") or {}
 
             if self._user_id is None and user.get("id") is not None:
@@ -1424,13 +1425,17 @@ class SchulmanagerClient:
 
     async def async_update(self, enabled_features: dict[str, bool] | None = None, date_range_config: dict[str, int] | None = None) -> dict[str, Any]:
         """Pull latest data for all students and return structured dict with optional feature filtering."""
-        # Make sure logged in and bundle known
-        if not self._token:
-            await self.async_login()
+        # Always re-authenticate to ensure the JWT is fresh (tokens expire server-side
+        # after ~1 hour, matching the default update interval).
+        _LOGGER.debug("Schulmanager: refreshing authentication token")
+        await self.async_login()
         if not self._token:
             # async_login() may return without a token for multi-school accounts
             # (API returns multipleAccounts instead of JWT). Raise so the coordinator
             # can mark the update as failed instead of silently returning empty data.
+            _LOGGER.error(
+                "Schulmanager: authentication failed – no valid token after login attempt"
+            )
             raise RuntimeError(
                 "Authentication failed: no token after login "
                 "(account may require institutionId – check integration configuration)"

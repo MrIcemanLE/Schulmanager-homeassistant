@@ -1,5 +1,16 @@
 # Schulmanager Integration – Changelog
 
+## 0.8.2 (2026-03-12)
+
+### 🐛 Bugfixes
+- **Stundenplan-Sensoren zeigten nach ca. 1 Stunde „Schulfrei" (Issue #5)**
+  - Problem: Nach einem Neustart funktionierten alle Sensoren korrekt. Nach genau einer Stunde zeigten Stundenplan Heute, Morgen und Änderungen fälschlicherweise leere Werte – ein weiterer Neustart stellte die Daten wieder her
+  - Ursache: Der Schulmanager-Server gibt JWT-Tokens aus, die nach ~1 Stunde ablaufen. Die Integration erneuerte das Token nur beim ersten Login, nicht bei jedem stündlichen Datenabruf. Der abgelaufene Token führte intern zu einem HTTP-401-Fehler, der still geschluckt wurde und leere Daten hinterließ
+  - Lösung: Die Integration erneuert das Authentifizierungs-Token jetzt bei jedem automatischen Datenabruf
+  - Betrifft auch: Der „Jetzt aktualisieren"-Button war aus demselben Grund wirkungslos
+
+---
+
 ## 0.8.1 (2026-03-11)
 
 ### 🐛 Bugfixes
