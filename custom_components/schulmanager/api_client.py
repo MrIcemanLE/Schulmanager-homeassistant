@@ -730,7 +730,12 @@ class SchulmanagerClient:
                         "start": start_of_week.isoformat(),
                         "end": end_of_range.isoformat()
                     }
-                }
+                },
+                # Fetch school-specific class hour times (start/end per period)
+                {
+                    "moduleName": "schedules",
+                    "endpointName": "get-class-hours",
+                },
             ]
         }
 
@@ -776,9 +781,26 @@ class SchulmanagerClient:
 
         # Process results from batch response
         results = response_data.get("results", [])
+
+        # First pass: extract class hour time map {id -> {from, until}}
+        # Items with "from"/"until" keys are class hour entries (not lessons).
+        class_hours_map: dict[int, dict[str, Any]] = {}
+        for result in results:
+            if result.get("status") == 200 and isinstance(result.get("data"), list):
+                first = result["data"][0] if result["data"] else {}
+                if isinstance(first, dict) and "from" in first and "until" in first:
+                    for ch in result["data"]:
+                        ch_id = ch.get("id")
+                        if ch_id is not None:
+                            class_hours_map[ch_id] = ch
+
         for result in results:
             if result.get("status") == 200 and "data" in result:
                 lessons = result["data"]
+
+                # Skip the class-hours result (already processed above)
+                if isinstance(lessons, list) and lessons and isinstance(lessons[0], dict) and "from" in lessons[0]:
+                    continue
 
                 # Handle lessons array directly
                 if isinstance(lessons, list):
@@ -786,16 +808,36 @@ class SchulmanagerClient:
                         if not isinstance(lesson, dict):
                             continue
 
-                        # Extract lesson date (could be in different formats)
+                        # Extract lesson date first (needed for day-specific times)
                         lesson_date = None
                         for date_field in ["date", "start", "day"]:
                             if date_field in lesson:
                                 lesson_date_str = lesson[date_field]
                                 if isinstance(lesson_date_str, str):
-                                    lesson_date = lesson_date_str[
-                                        :10
-                                    ]  # Extract YYYY-MM-DD
+                                    lesson_date = lesson_date_str[:10]  # YYYY-MM-DD
                                     break
+
+                        # Enrich classHour with school-specific start/end times.
+                        # fromByDay/untilByDay use JS weekday convention (0=Sun..6=Sat).
+                        ch = lesson.get("classHour")
+                        if isinstance(ch, dict) and ch.get("id") in class_hours_map:
+                            ch_data = class_hours_map[ch["id"]]
+                            from_time = ch_data.get("from")
+                            until_time = ch_data.get("until")
+                            if lesson_date:
+                                try:
+                                    py_wd = date.fromisoformat(lesson_date).weekday()
+                                    js_day = (py_wd + 1) % 7  # Mon=1..Sun=0
+                                    from_by_day = ch_data.get("fromByDay") or []
+                                    until_by_day = ch_data.get("untilByDay") or []
+                                    if js_day < len(from_by_day) and from_by_day[js_day]:
+                                        from_time = from_by_day[js_day]
+                                    if js_day < len(until_by_day) and until_by_day[js_day]:
+                                        until_time = until_by_day[js_day]
+                                except (ValueError, TypeError):
+                                    pass
+                            ch["from"] = from_time
+                            ch["until"] = until_time
 
                         # Group by date for calendar usage
                         if lesson_date:

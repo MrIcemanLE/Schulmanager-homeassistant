@@ -6,6 +6,9 @@
       }
     },
     "sensor": {
+      "current_lesson": {
+        "name": "Current lesson"
+      },
       "schedule_today": {
         "name": "Schedule today"
       },

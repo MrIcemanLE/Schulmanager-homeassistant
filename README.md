@@ -77,6 +77,7 @@ Die Integration erstellt automatisch Entitäten für jeden Schüler:
 - `calendar.<schüler>_schultermine` – Schulweite Events (z.B. Schulball, BLF)
 
 ### Sensoren
+- `sensor.<schüler>_aktuelle_stunde` – Aktuelle Unterrichtsstunde (Echtzeit, Minutenaktualisierung)
 - `sensor.<schüler>_schedule_today` – Stundenplan heute (mit HTML-Tabelle)
 - `sensor.<schüler>_schedule_tomorrow` – Stundenplan morgen
 - `sensor.<schüler>_schedule_changes` – Änderungen für heute/morgen

@@ -1,5 +1,31 @@
 # Schulmanager Integration – Changelog
 
+## 0.9.0 (2026-03-24)
+
+### ✨ Neues
+
+- **Sensor „Aktuelle Stunde"**
+  - Neuer Sensor pro Schüler: `sensor.<schüler>_aktuelle_stunde`
+  - Zeigt in Echtzeit an, was gerade in der Schule passiert
+  - Mögliche Zustände: aktuelles Fach (z.B. „Mathematik – 3. Stunde"), Pause mit Endzeit, nächste Stunde mit Startzeit, Unterricht beendet, Schulfrei oder Wochenende
+  - Aktualisiert sich automatisch jede Minute – kein manueller Refresh nötig
+  - Attribute: aktuelles Fach, Lehrer, Raum, Ende der Stunde, nächstes Fach, nächste Startzeit
+  - Beispielautomatisierung: Dashboard-Karte die immer die aktuelle Unterrichtsstunde anzeigt
+
+- **Echte Schulzeiten direkt vom Server (Issue #6)**
+  - Stundenzeiten (z.B. wann Stunde 3 beginnt und endet) werden jetzt direkt von deiner Schule abgerufen statt hardcodiert zu sein
+  - Unterstützt automatisch unterschiedliche Zeiten je Wochentag (z.B. kürzere Stunden am Mittwoch)
+  - Kein Konfigurationsaufwand – funktioniert für jede Schule automatisch
+
+### 🐛 Bugfixes
+
+- **Kritischer Fehler im Log alle 60 Sekunden behoben**
+  - Jede Minute erschien ein `RuntimeError` im Home-Assistant-Log bezüglich `async_write_ha_state`
+  - Betraf den neuen „Aktuelle Stunde"-Sensor
+  - Behoben: Callback korrekt als event-loop-sicher markiert
+
+---
+
 ## 0.8.2 (2026-03-12)
 
 ### 🐛 Bugfixes

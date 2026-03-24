@@ -7,19 +7,21 @@ use stable, ID-based unique IDs.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 import logging
 from html import escape
 from typing import Any, cast
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.typing import StateType
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, OPT_SCHEDULE_HIGHLIGHT
 from .coordinator import SchulmanagerCoordinator
@@ -73,6 +75,7 @@ async def async_setup_entry(
         entities.append(ScheduleSensor(client, coord, sid, name, slug, "today"))
         entities.append(ScheduleSensor(client, coord, sid, name, slug, "tomorrow"))
         entities.append(ScheduleChangesSensor(client, coord, sid, name, slug))
+        entities.append(CurrentLessonSensor(client, coord, sid, name, slug))
 
         # Add grade sensors for each subject
         # We'll check for available subjects from the first update
@@ -1505,5 +1508,219 @@ class SchoolDiagnosticSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorE
 
         if self._school_name:
             attrs["school_name"] = self._school_name
+
+        return attrs
+
+
+class CurrentLessonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
+    """Sensor showing what is happening right now for a student.
+
+    Updates every minute via a time-interval listener so state transitions
+    (lesson start/end, break start) are reflected without waiting for the
+    next coordinator refresh.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:school-clock"
+    _attr_translation_key = "current_lesson"
+
+    def __init__(
+        self,
+        client: Any,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        slug: str,
+    ) -> None:
+        """Initialize the current-lesson sensor."""
+        super().__init__(coordinator)
+        self.client = client
+        self.student_id = student_id
+        self.student_name = student_name
+        self._attr_unique_id = f"schulmanager_{student_id}_current_lesson"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"student_{self.student_id}")},
+            name=self.student_name,
+            manufacturer="Schulmanager Online",
+            model="Schüler",
+            suggested_area="Schule",
+            configuration_url="https://login.schulmanager-online.de/",
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return bool(self.coordinator.last_update_success)
+
+    async def async_added_to_hass(self) -> None:
+        """Register a 1-minute interval to keep state current between coordinator updates."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_track_time_interval(
+                self.hass,
+                callback(lambda _: self.async_write_ha_state()),
+                timedelta(minutes=1),
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _get_today_lessons(self) -> list[dict[str, Any]]:
+        """Return today's lesson list from coordinator data."""
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        if integ is None:
+            return []
+        sched = cast(dict[str, Any], integ.get("schedule", {}).get(self.student_id, {}))
+        return cast(list[dict[str, Any]], sched.get("today", []) or [])
+
+    @staticmethod
+    def _parse_time(time_str: str | None) -> time | None:
+        """Parse a classHour time string like '08:30:00' or '08:30' to a time object."""
+        if not time_str:
+            return None
+        try:
+            return time.fromisoformat(time_str[:5])
+        except (ValueError, TypeError):
+            return None
+
+    def _timed_lessons(
+        self, lessons: list[dict[str, Any]]
+    ) -> list[tuple[time, time, dict[str, Any]]]:
+        """Return lessons that have valid from/until times, sorted by start time."""
+        result: list[tuple[time, time, dict[str, Any]]] = []
+        for lesson in lessons:
+            ch = lesson.get("classHour") or {}
+            from_t = self._parse_time(ch.get("from"))
+            until_t = self._parse_time(ch.get("until"))
+            if from_t is not None and until_t is not None:
+                result.append((from_t, until_t, lesson))
+        result.sort(key=lambda x: x[0])
+        return result
+
+    @staticmethod
+    def _lesson_subject_room(lesson: dict[str, Any]) -> tuple[str, str]:
+        """Extract subject abbreviation and room name from a lesson dict."""
+        actual = lesson.get("actualLesson") or {}
+        subject = (actual.get("subject") or {}).get("abbreviation") or ""
+        room = (actual.get("room") or {}).get("name") or ""
+        return subject, room
+
+    @staticmethod
+    def _lesson_teacher(lesson: dict[str, Any]) -> str:
+        """Extract the first teacher's abbreviation from a lesson dict."""
+        actual = lesson.get("actualLesson") or {}
+        teachers = actual.get("teachers") or []
+        if teachers:
+            return (teachers[0] or {}).get("abbreviation") or ""
+        return ""
+
+    # ------------------------------------------------------------------
+    # State & attributes
+    # ------------------------------------------------------------------
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the current lesson state."""
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        if integ is None:
+            return None
+
+        now = dt_util.now()
+
+        # Weekend
+        if now.weekday() >= 5:
+            return "Wochenende"
+
+        lessons = self._get_today_lessons()
+        if not lessons:
+            return "Schulfrei"
+
+        timed = self._timed_lessons(lessons)
+
+        # Fallback: no time info available
+        if not timed:
+            deviations = any(
+                lesson.get("type") != "regularLesson" or not lesson.get("actualLesson")
+                for lesson in lessons
+                if isinstance(lesson, dict)
+            )
+            return "Abweichung" if deviations else "Planmäßig"
+
+        now_t = now.time()
+
+        # Before school starts
+        if now_t < timed[0][0]:
+            return f"Unterricht ab {timed[0][0].strftime('%H:%M')} Uhr"
+
+        # After school ends
+        if now_t >= timed[-1][1]:
+            return "Unterricht beendet"
+
+        # Currently in a lesson?
+        for from_t, until_t, lesson in timed:
+            if from_t <= now_t < until_t:
+                subject, room = self._lesson_subject_room(lesson)
+                if subject and room:
+                    return f"{subject} – {room}"
+                return subject or "Unterricht"
+
+        # Between lessons → find next lesson start
+        for from_t, _until_t, _lesson in timed:
+            if from_t > now_t:
+                return f"Pause (bis {from_t.strftime('%H:%M')} Uhr)"
+
+        return "Pause"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return detailed current and next lesson information."""
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        if integ is None:
+            return None
+
+        lessons = self._get_today_lessons()
+        timed = self._timed_lessons(lessons)
+        if not timed:
+            return None
+
+        now_t = dt_util.now().time()
+        attrs: dict[str, Any] = {
+            "current_subject": None,
+            "current_subject_full": None,
+            "current_teacher": None,
+            "current_room": None,
+            "lesson_end": None,
+            "next_subject": None,
+            "next_lesson_start": None,
+        }
+
+        # Find active lesson
+        current_idx: int | None = None
+        for idx, (from_t, until_t, lesson) in enumerate(timed):
+            if from_t <= now_t < until_t:
+                actual = lesson.get("actualLesson") or {}
+                subj = actual.get("subject") or {}
+                attrs["current_subject"] = subj.get("abbreviation")
+                attrs["current_subject_full"] = subj.get("name")
+                attrs["current_teacher"] = self._lesson_teacher(lesson)
+                attrs["current_room"] = (actual.get("room") or {}).get("name")
+                attrs["lesson_end"] = until_t.strftime("%H:%M")
+                current_idx = idx
+                break
+
+        # Find next lesson
+        start_search = (current_idx + 1) if current_idx is not None else 0
+        for from_t, _until_t, lesson in timed[start_search:]:
+            if from_t > now_t or current_idx is not None:
+                subject, _ = self._lesson_subject_room(lesson)
+                attrs["next_subject"] = subject or None
+                attrs["next_lesson_start"] = from_t.strftime("%H:%M")
+                break
 
         return attrs

@@ -6,6 +6,9 @@
       }
     },
     "sensor": {
+      "current_lesson": {
+        "name": "Aktuelle Stunde"
+      },
       "schedule_today": {
         "name": "Stundenplan heute"
       },
