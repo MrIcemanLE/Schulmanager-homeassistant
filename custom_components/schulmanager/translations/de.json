@@ -23,6 +23,9 @@
       },
       "next_exam_days": {
         "name": "Tage bis nächste Arbeit"
+      },
+      "wochenplan_json": {
+        "name": "Wochenplan JSON"
       }
     },
     "todo": {

@@ -7,7 +7,7 @@ use stable, ID-based unique IDs.
 
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 import logging
 from html import escape
 from typing import Any, cast
@@ -115,6 +115,9 @@ async def async_setup_entry(
         school_name = st.get("school_name")  # May be None for single-school accounts
         school_id = st.get("school_id")  # May be None for single-school accounts
         entities.append(SchoolDiagnosticSensor(coord, sid, name, slug, school_name, school_id))
+
+        # Add Wochenplan JSON sensor (for Stundenplan Card integration)
+        entities.append(WochenplanJsonSensor(client, coord, sid, name, slug))
 
     async_add_entities(entities)
 
@@ -1723,4 +1726,179 @@ class CurrentLessonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnti
                 attrs["next_lesson_start"] = from_t.strftime("%H:%M")
                 break
 
-        return attrs
+
+# ---------------------------------------------------------------------------
+# Wochenplan JSON Sensor (for Stundenplan Card integration)
+# ---------------------------------------------------------------------------
+
+_WEEKDAY_KEYS = ["Mo", "Di", "Mi", "Do", "Fr"]
+
+
+class WochenplanJsonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
+    """Sensor providing the current week's schedule as JSON for the Stundenplan Card."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "wochenplan_json"
+    _attr_icon = "mdi:table-large"
+
+    def __init__(
+        self,
+        client: Any,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        slug: str,
+    ) -> None:
+        """Initialize the Wochenplan JSON sensor."""
+        super().__init__(coordinator)
+        self.client = client
+        self.student_id = student_id
+        self.student_name = student_name
+        self._attr_unique_id = f"schulmanager_{student_id}_wochenplan_json"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"student_{self.student_id}")},
+            name=self.student_name,
+            manufacturer="Schulmanager Online",
+            model="Schüler",
+        )
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the calendar week as state."""
+        today = date.today()
+        weekday = today.weekday()
+        monday = today - timedelta(days=weekday) if weekday < 5 else today + timedelta(days=7 - weekday)
+        iso = monday.isocalendar()
+        return f"KW {iso[1]} ({monday.isoformat()})"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the plan as a list compatible with the Stundenplan Card."""
+        coord_data = cast(IntegrationData | None, self.coordinator.data)
+        if coord_data is None:
+            return {"plan": []}
+
+        schedule = cast(dict[str, Any], coord_data.get("schedule", {})).get(self.student_id, {})
+        week_map: dict[str, list[dict[str, Any]]] = schedule.get("week", {})
+
+        plan = self._build_plan(week_map)
+        lesson_rows = [r for r in plan if not r.get("break")]
+        return {
+            "plan": plan,
+            "lesson_count": len(lesson_rows),
+        }
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _build_plan(self, week_map: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        """Build the Stundenplan Card JSON plan from the current week's lessons."""
+        if not week_map:
+            return []
+
+        today = date.today()
+        weekday = today.weekday()
+        # If weekend, show next week
+        monday = today - timedelta(days=weekday) if weekday < 5 else today + timedelta(days=7 - weekday)
+
+        # Try to build plan for this week
+        plan = self._build_plan_for_week(week_map, monday)
+        if plan:
+            return plan
+
+        # Fallback: If this week has no lessons, find first week with data
+        _LOGGER.debug(
+            "No lessons found for week starting %s, trying to find first available week",
+            monday.isoformat(),
+        )
+        available_dates = sorted(week_map.keys())
+        if not available_dates:
+            return []
+
+        # Find first date, then compute its Monday
+        first_date = date.fromisoformat(available_dates[0])
+        fallback_monday = first_date - timedelta(days=first_date.weekday())
+        plan = self._build_plan_for_week(week_map, fallback_monday)
+        if plan:
+            _LOGGER.info("Using fallback week starting %s (first available)", fallback_monday.isoformat())
+        return plan
+
+    def _build_plan_for_week(
+        self, week_map: dict[str, list[dict[str, Any]]], monday: date
+    ) -> list[dict[str, Any]]:
+        """Build plan for a specific Monday-start week."""
+
+        # periods[period_num][day_index 0-4] = subject_label
+        periods: dict[str, dict[int, str]] = {}
+        period_times: dict[str, tuple[str, str]] = {}  # period_num -> (from, until)
+
+        for day_offset in range(5):
+            day_str = (monday + timedelta(days=day_offset)).isoformat()
+            for lesson in week_map.get(day_str, []):
+                ch = lesson.get("classHour") or {}
+                period_num = str(ch.get("number", "?"))
+                if period_num not in periods:
+                    periods[period_num] = {}
+                    period_times[period_num] = (
+                        str(ch.get("from") or ""),
+                        str(ch.get("until") or ""),
+                    )
+                periods[period_num][day_offset] = self._subject_label(lesson)
+
+        def _sort_key(p: str) -> int:
+            try:
+                return int(p)
+            except (ValueError, TypeError):
+                return 999
+
+        sorted_periods = sorted(periods.keys(), key=_sort_key)
+
+        plan: list[dict[str, Any]] = []
+        prev_num: str | None = None
+        row_id = 1
+
+        for period_num in sorted_periods:
+            # Insert break if there is a gap between periods
+            if prev_num is not None:
+                try:
+                    if int(period_num) > int(prev_num) + 1:
+                        prev_until = period_times[prev_num][1]
+                        curr_from = period_times[period_num][0]
+                        break_time = f"{prev_until} - {curr_from}" if prev_until and curr_from else ""
+                        plan.append({"break": True, "Stunde": break_time, "label": "Pause"})
+                except (ValueError, TypeError):
+                    pass
+
+            from_t, until_t = period_times[period_num]
+            stunde = f"{period_num}. {from_t} - {until_t}" if from_t else str(period_num)
+            row: dict[str, Any] = {"ID": row_id, "Stunde": stunde}
+            for idx, day_key in enumerate(_WEEKDAY_KEYS):
+                row[day_key] = periods[period_num].get(idx, "")
+            plan.append(row)
+
+            prev_num = period_num
+            row_id += 1
+
+        return plan
+
+    @staticmethod
+    def _subject_label(lesson: dict[str, Any]) -> str:
+        """Return a human-readable label for a lesson cell."""
+        lesson_type = lesson.get("type", "regularLesson")
+        actual = lesson.get("actualLesson") or {}
+        subject_abbr = (actual.get("subject") or {}).get("abbreviation", "")
+
+        if lesson_type == "cancelledLesson":
+            orig_lessons = lesson.get("originalLessons") or []
+            orig_abbr = (orig_lessons[0].get("subject") or {}).get("abbreviation", "?") if orig_lessons else "?"
+            return f"{orig_abbr} ✗"
+
+        if lesson_type in ("substitution", "teacherChange"):
+            return f"{subject_abbr} ↔" if subject_abbr else "↔"
+
+        return subject_abbr

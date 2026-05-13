@@ -1,5 +1,27 @@
 # Schulmanager Integration – Changelog
 
+## 0.9.1 (2026-05-13)
+
+### ✨ Neues
+
+- **Sensor „Wochenplan JSON" – Kompatibel mit der [Stundenplan Card](https://github.com/fabel-smith/stundenplan-card) (Issue #7)**
+  - Neuer Sensor pro Schüler: `sensor.<schüler>_wochenplan_json`
+  - Liefert den aktuellen Wochenplan als JSON – direkt nutzbar mit der beliebten [Stundenplan Card](https://github.com/fabel-smith/stundenplan-card) von fabel-smith
+  - Einrichtung in der Stundenplan Card: Datenquelle → „Beliebiger Sensor (JSON)" → diesen Sensor auswählen
+  - Ausfälle und Vertretungen werden automatisch markiert (Ausfall: `Fach ✗`, Vertretung: `Fach ↔`)
+  - Am Wochenende wird automatisch der Plan für die nächste Woche angezeigt
+  - Sensor-Zustand zeigt die aktuelle Kalenderwoche und das Montag-Datum (z.B. `KW 19 (2026-05-04)`)
+  - Danke an @8R3N38 für die Idee und den Tipp zur Stundenplan Card! 🙏
+
+### 🐛 Bugfixes
+
+- **Erledigte Hausaufgaben nach Neustart zurückgesetzt**
+  - Problem: Hausaufgaben, die als „erledigt" markiert waren, wurden nach jedem Neustart von Home Assistant wieder auf „offen" gesetzt
+  - Ursache: Der Status war nur im Arbeitsspeicher gespeichert und ging beim Neustart verloren
+  - Lösung: Der Erledigt-Status wird jetzt dauerhaft im HA-Storage gespeichert und überlebt Neustarts, Integrations-Updates und HA-Updates
+
+---
+
 ## 0.9.0 (2026-03-24)
 
 ### ✨ Neues

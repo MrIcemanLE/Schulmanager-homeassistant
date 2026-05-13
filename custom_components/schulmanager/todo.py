@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -19,6 +20,9 @@ from .coordinator import SchulmanagerCoordinator
 from .util import normalize_student_slug
 
 _LOGGER = logging.getLogger(__name__)
+
+STORAGE_VERSION = 1
+STORAGE_KEY_PREFIX = f"{DOMAIN}_todo"
 
 
 def _make_uid(student_id: str, item: dict) -> str:
@@ -92,23 +96,38 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         self._attr_translation_key = "homework"
         self._attr_icon = "mdi:clipboard-check-multiple-outline"
         self._attr_todo_items: list[TodoItem] | None = None
+        self._store: Store | None = None
+        # uid -> TodoItemStatus string value; persisted across restarts
+        self._persisted_statuses: dict[str, str] = {}
 
         _LOGGER.info(
-            "Created HomeworkTodoList for %s (unique_id: %s, entity_id: todo.%s)",
+            "Created HomeworkTodoList for %s (unique_id: %s)",
             student_name,
-            self._attr_unique_id,
             self._attr_unique_id,
         )
 
     async def async_added_to_hass(self) -> None:
-        """Handle entity added to hass."""
-        _LOGGER.info(
-            "HomeworkTodoList %s (student %s) added to hass, subscribing to coordinator",
-            self._attr_unique_id,
-            self.student_id,
-        )
+        """Handle entity added to hass, load persisted todo statuses."""
         await super().async_added_to_hass()
-        # Force an immediate update to make sure entity receives current data
+
+        # Initialize persistent store (keyed by student_id for stability)
+        self._store = Store(
+            self.hass,
+            STORAGE_VERSION,
+            f"{STORAGE_KEY_PREFIX}_{self.student_id}",
+        )
+
+        # Load previously persisted statuses
+        stored_data = await self._store.async_load()
+        if stored_data and isinstance(stored_data, dict):
+            self._persisted_statuses = stored_data.get("statuses", {})
+            _LOGGER.debug(
+                "Loaded %d persisted todo statuses for student %s",
+                len(self._persisted_statuses),
+                self.student_id,
+            )
+
+        # Force an immediate update so persisted statuses are applied
         self._handle_coordinator_update()
 
     @property
@@ -133,45 +152,32 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         student_homework = homework_data.get(self.student_id, [])
 
         _LOGGER.debug(
-            "Updating homework items for student %s: found %d items. Available students in homework data: %s",
+            "Updating homework items for student %s: found %d items",
             self.student_id,
             len(student_homework),
-            list(homework_data.keys())
         )
 
-        # Create a map of existing items by UID for status preservation
-        existing_items = {}
+        # Build map of current in-memory items for status lookup
+        existing_items: dict[str, TodoItem] = {}
         if self._attr_todo_items:
-            existing_items = {
-                item.uid: item
-                for item in self._attr_todo_items
-                if item.uid
-            }
+            existing_items = {item.uid: item for item in self._attr_todo_items if item.uid}
 
         if not student_homework:
             self._attr_todo_items = []
         else:
-            todo_items = []
-            current_uids = set()
+            todo_items: list[TodoItem] = []
+            current_uids: set[str] = set()
 
             for item in student_homework:
-                # Debug: Zeige Item-Details
-                _LOGGER.debug("Processing homework item: %s", item)
-
                 uid = _make_uid(self.student_id, item)
                 current_uids.add(uid)
 
-                # Erstelle Titel aus Fach und Hausaufgabe
                 subject = item.get("subject", "").strip()
                 homework = item.get("homework", "").strip()
                 date = item.get("date", "").strip()
 
-                # Verschiedene Titel-Formate probieren
                 if subject and homework:
-                    if date:
-                        title = f"[{date}] {subject}: {homework}"
-                    else:
-                        title = f"{subject}: {homework}"
+                    title = f"[{date}] {subject}: {homework}" if date else f"{subject}: {homework}"
                 elif homework:
                     title = homework
                 elif subject:
@@ -179,43 +185,33 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
                 else:
                     title = "Hausaufgabe"
 
-                # Titel-Länge begrenzen
                 title = title[:255]
 
-                # Preserve existing status if item already exists
-                existing_item = existing_items.get(uid)
-                status = (
-                    existing_item.status
-                    if existing_item
-                    else TodoItemStatus.NEEDS_ACTION
-                )
-
-                todo_items.append(TodoItem(
-                    summary=title,
-                    uid=uid,
-                    status=status
-                ))
-
-                if existing_item:
+                # Status priority:
+                # 1. Current in-memory item (reflects any unsaved changes in this session)
+                # 2. Persisted status from storage (survives restarts and updates)
+                # 3. Default: NEEDS_ACTION
+                if existing_item := existing_items.get(uid):
+                    status = existing_item.status
+                elif persisted := self._persisted_statuses.get(uid):
+                    status = TodoItemStatus(persisted)
                     _LOGGER.debug(
-                        "Preserved status for TodoItem: %s (uid: %s, status: %s)",
-                        title[:50], uid[:8], status
+                        "Restored persisted status for TodoItem: %s (uid: %s, status: %s)",
+                        title[:50], uid[:8], status,
                     )
                 else:
-                    _LOGGER.debug(
-                        "Created new TodoItem: %s (uid: %s)",
-                        title[:50], uid[:8]
-                    )
+                    status = TodoItemStatus.NEEDS_ACTION
 
-            # Log removed items for debugging
+                todo_items.append(TodoItem(summary=title, uid=uid, status=status))
+
+            # Log removed items
             if existing_items:
                 removed_uids = set(existing_items.keys()) - current_uids
                 if removed_uids:
                     _LOGGER.debug(
-                        "Removed %d outdated todo items for student %s: %s",
+                        "Removed %d outdated todo items for student %s",
                         len(removed_uids),
                         self.student_id,
-                        [uid[:8] for uid in removed_uids]
                     )
 
             self._attr_todo_items = todo_items
@@ -223,7 +219,7 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         _LOGGER.debug(
             "Updated %d todo items for student %s",
             len(self._attr_todo_items or []),
-            self.student_id
+            self.student_id,
         )
         super()._handle_coordinator_update()
 
@@ -238,38 +234,57 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         if not item.uid or not self._attr_todo_items:
             return
 
-        # Find and update the item in our local list
         for i, existing_item in enumerate(self._attr_todo_items):
             if existing_item.uid == item.uid:
-                # Only allow status updates, preserve other fields from original
+                new_status = item.status or existing_item.status
                 updated_item = TodoItem(
                     summary=existing_item.summary,
                     uid=existing_item.uid,
-                    status=item.status or existing_item.status,
+                    status=new_status,
                     due=existing_item.due,
                     description=existing_item.description,
                 )
                 self._attr_todo_items[i] = updated_item
 
+                # Persist the status change
+                # Use str() to handle both StrEnum and plain str from HA
+                status_str = str(new_status)
+                if status_str == TodoItemStatus.NEEDS_ACTION:
+                    # Remove from storage when reset to default (keeps storage clean)
+                    self._persisted_statuses.pop(item.uid, None)
+                else:
+                    self._persisted_statuses[item.uid] = status_str
+
+                await self._async_save_statuses()
+
                 _LOGGER.debug(
                     "Updated TodoItem status: %s (uid: %s, status: %s)",
                     (existing_item.summary or "")[:50],
                     (item.uid or "unknown")[:8],
-                    updated_item.status
+                    new_status,
                 )
-
-                # Notify Home Assistant of the state change
                 self.async_write_ha_state()
                 return
 
         _LOGGER.warning(
             "TodoItem with uid %s not found for update",
-            (item.uid or "unknown")[:8]
+            (item.uid or "unknown")[:8],
         )
 
     async def async_delete_todo_items(self, _uids: list[str]) -> None:
         """Delete todo items."""
         raise NotImplementedError("Cannot delete homework items from Schulmanager")
+
+    async def _async_save_statuses(self) -> None:
+        """Persist current todo statuses to HA storage."""
+        if self._store is None:
+            return
+        await self._store.async_save({"statuses": self._persisted_statuses})
+        _LOGGER.debug(
+            "Saved %d todo statuses for student %s",
+            len(self._persisted_statuses),
+            self.student_id,
+        )
 
     @property
     def should_poll(self) -> bool:

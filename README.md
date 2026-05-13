@@ -81,6 +81,7 @@ Die Integration erstellt automatisch Entitäten für jeden Schüler:
 - `sensor.<schüler>_schedule_today` – Stundenplan heute (mit HTML-Tabelle)
 - `sensor.<schüler>_schedule_tomorrow` – Stundenplan morgen
 - `sensor.<schüler>_schedule_changes` – Änderungen für heute/morgen
+- `sensor.<schüler>_wochenplan_json` – Wochenplan als JSON (für [Stundenplan Card](https://github.com/fabel-smith/stundenplan-card))
 - `sensor.<schüler>_next_exam_days` – Tage bis zur nächsten Arbeit
 - `sensor.<schüler>_noten_<fach>` – Noten pro Fach
 - `sensor.<schüler>_noten_gesamt` – Gesamtdurchschnitt
@@ -130,6 +131,16 @@ action:
 ```
 
 Das neue `plain` Attribut enthält eine lesbare Version des Stundenplans mit Emoji-Markierung.
+
+## 📅 Stundenplan Card
+
+Mit dem `wochenplan_json`-Sensor lässt sich die [Stundenplan Card](https://github.com/fabel-smith/stundenplan-card) direkt mit Echtzeitdaten aus dem Schulmanager befüllen:
+
+1. Stundenplan Card installieren (HACS → [fabel-smith/stundenplan-card](https://github.com/fabel-smith/stundenplan-card))
+2. Karte hinzufügen → Datenquelle: **„Beliebiger Sensor (JSON)"**
+3. Sensor auswählen: `sensor.<schüler>_wochenplan_json`
+
+Ausfälle erscheinen als `Fach ✗`, Vertretungen als `Fach ↔`. Am Wochenende wird automatisch die nächste Woche angezeigt.
 
 ## 🛠️ Services
 
