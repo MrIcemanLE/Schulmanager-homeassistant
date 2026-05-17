@@ -31,15 +31,16 @@ jobs:
         id: changelog
         run: |
           # Extract the changelog for this version
+          # Expected format: "## X.Y.Z (YYYY-MM-DD)" (no square brackets)
+          version="${{ steps.version.outputs.version }}"
           if [ -f CHANGELOG.md ]; then
-            # Use sed to extract the section for this version
-            sed -n "/^## \[${{ steps.version.outputs.version }}\]/,/^## \[/p" CHANGELOG.md | sed '$d' | tail -n +2 > release_notes.txt
+            awk "/^## ${version}[^0-9]/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md > release_notes.txt
             # If the extraction is empty, use a default message
             if [ ! -s release_notes.txt ]; then
-              echo "Release v${{ steps.version.outputs.version }}" > release_notes.txt
+              echo "Release v${version}" > release_notes.txt
             fi
           else
-            echo "Release v${{ steps.version.outputs.version }}" > release_notes.txt
+            echo "Release v${version}" > release_notes.txt
           fi
 
       - name: Validate manifest version
