@@ -1,4 +1,4 @@
-name: Release
+name: Validate Release
 
 on:
   push:
@@ -6,69 +6,20 @@ on:
       - 'v*'
 
 jobs:
-  release:
-    name: Create Release
+  validate:
+    name: Validate manifest version
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+      - uses: actions/checkout@v4
 
-      - name: Get version
-        id: version
+      - name: Check manifest version matches tag
         run: |
-          version=${GITHUB_REF#refs/tags/v}
-          echo "Extracted version: $version"
-          echo "version=$version" >> $GITHUB_OUTPUT
-
-      - name: Extract changelog
-        id: changelog
-        run: |
-          # Extract the changelog for this version
-          # Expected format: "## X.Y.Z (YYYY-MM-DD)" (no square brackets)
-          version="${{ steps.version.outputs.version }}"
-          if [ -f CHANGELOG.md ]; then
-            awk "/^## ${version}[^0-9]/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md > release_notes.txt
-            # If the extraction is empty, use a default message
-            if [ ! -s release_notes.txt ]; then
-              echo "Release v${version}" > release_notes.txt
-            fi
-          else
-            echo "Release v${version}" > release_notes.txt
-          fi
-
-      - name: Validate manifest version
-        run: |
-          echo "Checking if custom_components/schulmanager/manifest.json exists..."
-          ls -la custom_components/schulmanager/manifest.json
-          manifest_version=$(cat custom_components/schulmanager/manifest.json | jq -r '.version')
-          echo "Manifest version: $manifest_version"
-          echo "Tag version: ${{ steps.version.outputs.version }}"
-          if [ "$manifest_version" != "${{ steps.version.outputs.version }}" ]; then
-            echo "Error: Manifest version ($manifest_version) does not match tag version (${{ steps.version.outputs.version }})"
+          tag=${GITHUB_REF#refs/tags/v}
+          manifest=$(jq -r '.version' custom_components/schulmanager/manifest.json)
+          echo "Tag version:      $tag"
+          echo "Manifest version: $manifest"
+          if [ "$manifest" != "$tag" ]; then
+            echo "::error::Version mismatch – update manifest.json before pushing the tag"
             exit 1
-          else
-            echo "Version validation passed!"
           fi
-
-      - name: Zip integration
-        run: |
-          cd custom_components/schulmanager
-          zip -r ../../schulmanager-${{ steps.version.outputs.version }}.zip . -x "*.pyc" "__pycache__/*" "debug/*"
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: Release v${{ steps.version.outputs.version }}
-          body_path: release_notes.txt
-          files: schulmanager-${{ steps.version.outputs.version }}.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "Version OK: $manifest"
