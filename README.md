@@ -11,6 +11,7 @@ Bringt Stundenplan, Arbeiten, Hausaufgaben und Noten aus Schulmanager Online dir
 - **📝 Hausaufgaben** – Als To‑Do‑Listen mit Status-Verwaltung
 - **🧮 Noten** – Pro Fach und Gesamtdurchschnitt mit detaillierten Zusammenfassungen, inkl. Punktesystem der gymnasialen Oberstufe (Sek II, 0–15 Punkte)
 - **🔔 Ereignisse** – Bei neuen Hausaufgaben oder Noten
+- **✉️ Elternbriefe & Nachrichten** – Anzahl ungelesener Elternbriefe und Messenger-Nachrichten (ohne etwas als gelesen zu markieren)
 - **🏫 Multi-School Support** – Automatische Verwaltung bei Kindern an mehreren Schulen
 
 ## 🔧 Installation
@@ -49,6 +50,8 @@ Bringt Stundenplan, Arbeiten, Hausaufgaben und Noten aus Schulmanager Online dir
 | **Arbeiten abrufen** | ✅ Ein | Kalender für Klausuren/Tests |
 | **Hausaufgaben abrufen** | ✅ Ein | To-Do-Listen für Hausaufgaben |
 | **Noten abrufen** | ✅ Ein | Noten-Sensoren pro Fach und Gesamtdurchschnitt |
+| **Ungelesene Elternbriefe abrufen** | ✅ Ein | Sensor mit Anzahl und Details ungelesener Elternbriefe |
+| **Ungelesene Nachrichten abrufen** | ✅ Ein | Sensor mit Anzahl ungelesener Messenger-Nachrichten und betroffenen Unterhaltungen |
 
 ### Stundenplan-Einstellungen
 | Parameter | Standard | Beschreibung |
@@ -88,6 +91,12 @@ Die Integration erstellt automatisch Entitäten für jeden Schüler:
 - `sensor.<schüler>_noten_<fach>` – Noten pro Fach
 - `sensor.<schüler>_noten_gesamt` – Gesamtdurchschnitt
 - `sensor.<schüler>_schule` – Schulzugehörigkeit (bei Multi-School)
+
+Pro Zugang (Gerät „Schulmanager Online“):
+- `sensor.schulmanager_online_ungelesene_elternbriefe` – Anzahl ungelesener Elternbriefe; Attribut `letters` mit `title`, `sent`, `deadline`, `students`, `text` (gekürzt) und `attachments`
+- `sensor.schulmanager_online_ungelesene_nachrichten` – Anzahl ungelesener Messenger-Nachrichten; Attribut `threads` mit `subject`, `sender`, `recipients`, `unread` und `last`
+
+> **Datenschutz/Lesestatus:** Für Elternbriefe wird nur die Liste *ungelesener* Briefe abgefragt (wie das Widget auf der Startseite des Portals) – kein Brief wird geöffnet. Beim Messenger werden nur Zähler und Unterhaltungen geladen, **keine Nachrichtentexte**, damit keine Lesebestätigungen ausgelöst werden. Lesen und Bestätigen erfolgt weiterhin in der App bzw. im Portal.
 
 ### To-Do Listen
 - `todo.<schüler>_hausaufgaben` – Hausaufgaben mit Status-Verwaltung

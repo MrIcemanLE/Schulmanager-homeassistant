@@ -512,6 +512,40 @@ class SchulmanagerClient:
                 else data
             )
 
+    async def fetch_unread_letters(self) -> list[dict[str, Any]]:
+        """Fetch unread parent letters (Elternbriefe) of the account.
+
+        Uses the same endpoint as the dashboard widget of the web app. Only the list of
+        unread letters is requested; no letter is opened, so nothing is marked as read.
+        """
+        data = await self._api_call(
+            "letters", "get-unread-letters-for-widget", {}, "letters_unread"
+        )
+        return [x for x in data if isinstance(x, dict)] if isinstance(data, list) else []
+
+    async def fetch_unread_messages(self) -> tuple[int | None, list[dict[str, Any]]]:
+        """Fetch the unread messenger count and conversations with unread messages.
+
+        Only metadata is requested (count and subscriptions/threads). Message bodies are
+        intentionally not fetched, because opening a thread may create read receipts.
+        """
+        count_raw = await self._api_call(
+            "messenger", "count-new-messages", {}, "messenger_count"
+        )
+        count = int(count_raw) if isinstance(count_raw, (int, float)) else None
+        subs = await self._api_call(
+            "messenger",
+            "get-subscriptions",
+            {"all": False, "includeArchived": False},
+            "messenger_subscriptions",
+        )
+        unread = [
+            x
+            for x in (subs if isinstance(subs, list) else [])
+            if isinstance(x, dict) and (x.get("unreadCount") or 0) > 0
+        ]
+        return count, unread
+
     async def fetch_homework(self, student_id: str) -> list[dict]:
         """Fetch homework for a student."""
         params = {"student": {"id": int(student_id)}}
@@ -1768,6 +1802,8 @@ class SchulmanagerClient:
                 "schedule": True,
                 "exams": True,
                 "grades": True,
+                "letters": True,
+                "messages": True,
             }
 
         result: dict[str, Any] = {
@@ -1854,6 +1890,24 @@ class SchulmanagerClient:
                     result["grades"][sid] = {"subjects": {}}
             else:
                 result["grades"][sid] = {"subjects": {}}
+
+        # Account-level data (not per student)
+        if enabled_features.get("letters", True):
+            try:
+                result["letters_unread"] = await self.fetch_unread_letters()
+            except Exception as err:  # noqa: BLE001 - optional feature, keep other data
+                _LOGGER.warning("Schulmanager: letters fetch failed: %s", err)
+                result["letters_unread"] = []
+
+        if enabled_features.get("messages", True):
+            try:
+                count, unread = await self.fetch_unread_messages()
+                result["messages_unread_count"] = count
+                result["messages_unread"] = unread
+            except Exception as err:  # noqa: BLE001 - optional feature, keep other data
+                _LOGGER.warning("Schulmanager: messenger fetch failed: %s", err)
+                result["messages_unread_count"] = None
+                result["messages_unread"] = []
 
         # Save for other platforms
         self.data = result
@@ -2161,6 +2215,21 @@ class SchulmanagerHubClient:
             for key in ["homework", "schedule", "exams", "grades"]:
                 if key in client_result:
                     result[key].update(client_result[key])
+
+            # Merge account-level data (letters/messages) across schools
+            if "letters_unread" in client_result:
+                result.setdefault("letters_unread", []).extend(
+                    client_result.get("letters_unread") or []
+                )
+            if "messages_unread" in client_result:
+                result.setdefault("messages_unread", []).extend(
+                    client_result.get("messages_unread") or []
+                )
+                cnt = client_result.get("messages_unread_count")
+                if isinstance(cnt, int):
+                    result["messages_unread_count"] = (
+                        result.get("messages_unread_count") or 0
+                    ) + cnt
 
         return result
 

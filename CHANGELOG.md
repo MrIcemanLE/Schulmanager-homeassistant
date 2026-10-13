@@ -1,5 +1,21 @@
 # Schulmanager Integration – Changelog
 
+## Unreleased
+
+### ✨ Neues
+
+- **Ungelesene Elternbriefe**
+  - Neuer Sensor „Ungelesene Elternbriefe“ am Gerät „Schulmanager Online“ mit Anzahl sowie Titel, Versanddatum, Rückmeldefrist, betroffenen Kindern, Textauszug und Anzahl der Anhänge
+  - Abgefragt wird nur die Liste ungelesener Briefe (Widget-Endpunkt) – Briefe werden nicht geöffnet und bleiben in der App ungelesen
+  - In den Optionen abschaltbar („Ungelesene Elternbriefe abrufen“)
+
+- **Ungelesene Messenger-Nachrichten**
+  - Neuer Sensor „Ungelesene Nachrichten“ mit Anzahl und den Unterhaltungen, die ungelesene Nachrichten enthalten (Betreff, Absender, Empfänger, Anzahl, Zeitpunkt)
+  - Nachrichtentexte werden bewusst nicht geladen, damit keine Lesebestätigungen ausgelöst werden
+  - In den Optionen abschaltbar („Ungelesene Nachrichten abrufen“)
+
+---
+
 ## 0.10.2 (2026-09-20)
 
 ### 🐛 Bugfixes

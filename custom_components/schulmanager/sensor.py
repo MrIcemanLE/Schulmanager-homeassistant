@@ -8,14 +8,15 @@ use stable, ID-based unique IDs.
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
-from html import escape
+from html import escape, unescape
 import logging
+import re
 from typing import Any, cast
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
@@ -24,7 +25,15 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from . import grading
-from .const import DOMAIN, OPT_SCHEDULE_HIGHLIGHT
+from .const import (
+    DEFAULT_ENABLE_LETTERS,
+    DEFAULT_ENABLE_MESSAGES,
+    DOMAIN,
+    OPT_ENABLE_LETTERS,
+    OPT_ENABLE_MESSAGES,
+    OPT_SCHEDULE_HIGHLIGHT,
+    VERSION,
+)
 from .coordinator import SchulmanagerCoordinator
 from .types import IntegrationData
 from .util import normalize_student_slug
@@ -119,6 +128,12 @@ async def async_setup_entry(
 
         # Add Wochenplan JSON sensor (for Stundenplan Card integration)
         entities.append(WochenplanJsonSensor(client, coord, sid, name, slug))
+
+    # Account-level sensors (parents' inbox): unread letters and messenger conversations
+    if entry.options.get(OPT_ENABLE_LETTERS, DEFAULT_ENABLE_LETTERS):
+        entities.append(UnreadLettersSensor(coord))
+    if entry.options.get(OPT_ENABLE_MESSAGES, DEFAULT_ENABLE_MESSAGES):
+        entities.append(UnreadMessagesSensor(coord))
 
     async_add_entities(entities)
 
@@ -1845,3 +1860,150 @@ class WochenplanJsonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnt
         # Keep order, drop empties and exact duplicates.
         unique_labels = list(dict.fromkeys(label for label in labels if label))
         return " → ".join(unique_labels)
+
+
+def _service_device_info(coordinator: SchulmanagerCoordinator) -> DeviceInfo:
+    """Device of the Schulmanager account (shared with the refresh button)."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"service_{coordinator.config_entry.entry_id}")},
+        name="Schulmanager Online",
+        manufacturer="Schulmanager Online",
+        model="Portal-Zugang",
+        sw_version=VERSION,
+        entry_type=DeviceEntryType.SERVICE,
+        suggested_area="Schule",
+        configuration_url="https://login.schulmanager-online.de/",
+    )
+
+
+def _plain_text(value: Any, limit: int = 800) -> str:
+    """Convert letter HTML to compact plain text."""
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    text = re.sub(r"\s+", " ", unescape(text)).strip()
+    return text[:limit]
+
+
+class UnreadLettersSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
+    """Number of unread parent letters (Elternbriefe) with details as attributes.
+
+    Data comes from the dashboard widget endpoint of the web app; letters are never
+    opened, so reading them in the app is still required to mark them as read.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "letters_unread"
+    _attr_icon = "mdi:email-alert-outline"
+
+    def __init__(self, coordinator: SchulmanagerCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"schulmanager_{coordinator.config_entry.entry_id}_letters_unread"
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return _service_device_info(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return bool(self.coordinator.last_update_success)
+
+    def _letters(self) -> list[dict[str, Any]]:
+        data = cast(IntegrationData | None, self.coordinator.data) or {}
+        return [x for x in data.get("letters_unread") or [] if isinstance(x, dict)]
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the number of unread letters."""
+        return len(self._letters())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return the unread letters."""
+        letters = []
+        for letter in self._letters():
+            students = []
+            for status in letter.get("studentStatuses") or []:
+                student = status.get("student") if isinstance(status, dict) else None
+                if isinstance(student, dict):
+                    name = " ".join(
+                        x for x in (student.get("firstname"), student.get("lastname")) if x
+                    )
+                    if name:
+                        students.append(name)
+            letters.append(
+                {
+                    "id": letter.get("id"),
+                    "title": letter.get("title"),
+                    "sent": letter.get("sentDate"),
+                    "deadline": letter.get("answerDeadline"),
+                    "students": students,
+                    "text": _plain_text(letter.get("text")),
+                    "attachments": len(letter.get("attachments") or []),
+                }
+            )
+        return {"letters": letters}
+
+
+class UnreadMessagesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
+    """Number of unread messenger messages with the affected conversations.
+
+    Only conversation metadata is fetched (subject, sender, unread count). Message
+    bodies are not requested to avoid triggering read receipts.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "messages_unread"
+    _attr_icon = "mdi:message-badge-outline"
+
+    def __init__(self, coordinator: SchulmanagerCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"schulmanager_{coordinator.config_entry.entry_id}_messages_unread"
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return _service_device_info(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return bool(self.coordinator.last_update_success)
+
+    def _data(self) -> IntegrationData | dict[str, Any]:
+        return cast(IntegrationData | None, self.coordinator.data) or {}
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the number of unread messages."""
+        data = self._data()
+        count = data.get("messages_unread_count")
+        if isinstance(count, int):
+            return count
+        return sum(int(x.get("unreadCount") or 0) for x in data.get("messages_unread") or [])
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return conversations with unread messages, newest first."""
+        threads = []
+        for sub in self._data().get("messages_unread") or []:
+            thread = sub.get("thread") if isinstance(sub.get("thread"), dict) else {}
+            threads.append(
+                {
+                    "id": sub.get("id"),
+                    "subject": thread.get("subject"),
+                    "sender": thread.get("senderString"),
+                    "recipients": thread.get("recipientString"),
+                    "unread": sub.get("unreadCount"),
+                    "last": thread.get("lastMessageTimestamp"),
+                    "private": thread.get("isPrivateChat"),
+                }
+            )
+        threads.sort(key=lambda t: str(t.get("last") or ""), reverse=True)
+        return {"threads": threads}

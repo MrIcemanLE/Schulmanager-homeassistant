@@ -29,6 +29,12 @@
       },
       "wochenplan_json": {
         "name": "Weekly schedule JSON"
+      },
+      "letters_unread": {
+        "name": "Unread parent letters"
+      },
+      "messages_unread": {
+        "name": "Unread messages"
       }
     },
     "todo": {
@@ -89,6 +95,8 @@
           "enable_schedule": "Fetch schedule",
           "enable_exams": "Fetch exams",
           "enable_grades": "Fetch grades",
+          "enable_letters": "Fetch unread parent letters",
+          "enable_messages": "Fetch unread messages",
           "range_past_days": "Days in the past",
           "range_future_days": "Days in the future",
           "refresh_cooldown": "Manual refresh cooldown (minutes, 5-30)",
@@ -96,6 +104,10 @@
           "schedule_highlight": "Use emoji highlighting for changes/cancellations",
           "schedule_hide_cancelled_no_highlight": "Hide cancellations when highlighting is off",
           "debug_dumps": "Write debug dumps"
+        },
+        "data_description": {
+          "enable_letters": "Number and titles of unread parent letters. Letters are not opened, so they stay unread in the app.",
+          "enable_messages": "Number of unread messages and affected conversations. Message texts are not loaded, so no read receipts are sent."
         }
       }
     }
