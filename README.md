@@ -17,11 +17,12 @@ Bringt Stundenplan, Arbeiten, Hausaufgaben und Noten aus Schulmanager Online dir
 ## 🔧 Installation
 
 ### Über HACS (empfohlen)
-1. HACS öffnen → Integrationen → ⋮ (Menü) → Benutzerdefinierte Repositories
-2. Repository hinzufügen: `https://github.com/MrIcemanLE/Schulmanager-homeassistant`
-3. Kategorie: Integration
-4. "Schulmanager Online" suchen und installieren
-5. Home Assistant neu starten
+1. HACS öffnen → ⋮ (Menü oben rechts) → **Benutzerdefinierte Repositories**
+2. Repository `https://github.com/MrIcemanLE/Schulmanager-homeassistant` mit Typ **Integration** hinzufügen
+3. In HACS nach „Schulmanager Online“ suchen und herunterladen
+4. Home Assistant neu starten
+
+Voraussetzung: Home Assistant 2024.6 oder neuer.
 
 ### Manuelle Installation
 1. Dateien aus `custom_components/schulmanager` nach `<config>/custom_components/schulmanager/` kopieren
@@ -39,14 +40,14 @@ Bringt Stundenplan, Arbeiten, Hausaufgaben und Noten aus Schulmanager Online dir
    - Jeder Schüler erhält einen "Schule"-Sensor zur Identifikation
 
 3. **Konfiguration anpassen**
-   - Einstellungen → Integrationen → Schulmanager → Optionen
+   - Einstellungen → Geräte & Dienste → Schulmanager Online → **Konfigurieren**
 
 ## 🎛️ Konfigurationsparameter
 
 ### Datenquellen aktivieren/deaktivieren
 | Parameter | Standard | Beschreibung |
 |-----------|----------|--------------|
-| **Stundenplan abrufen** | ✅ Ein | Kalender und Sensoren für den Stundenplan |
+| **Stundenplan abrufen** | ✅ Ein | Stundenplan-Kalender und Stundenplan-Sensoren |
 | **Arbeiten abrufen** | ✅ Ein | Kalender für Klausuren/Tests |
 | **Hausaufgaben abrufen** | ✅ Ein | To-Do-Listen für Hausaufgaben |
 | **Noten abrufen** | ✅ Ein | Noten-Sensoren pro Fach und Gesamtdurchschnitt |
@@ -63,13 +64,15 @@ Bringt Stundenplan, Arbeiten, Hausaufgaben und Noten aus Schulmanager Online dir
 ### Aktualisierung
 | Parameter | Standard | Beschreibung |
 |-----------|----------|--------------|
-| **Manuelle Aktualisierung Cooldown** | 5 Min | Wartezeit zwischen manuellen Updates (5-30 Min) |
+| **Abkühlzeit für manuelle Aktualisierung** | 5 Min | Mindestabstand zwischen zwei manuellen Aktualisierungen (5–30 Min) |
 | **Tage in der Vergangenheit** | 30 | Zeitraum für rückwirkend abgerufene Daten (z.B. Arbeiten/Schultermine) |
 | **Tage in der Zukunft** | 180 | Zeitraum für im Voraus abgerufene Daten (z.B. Arbeiten/Schultermine) |
 
 ## 📊 Entitäten
 
-Die Integration erstellt automatisch Entitäten für jeden Schüler:
+Die Integration legt pro Schüler ein Gerät an, dazu das Gerät „Schulmanager Online“ für den Zugang. Alle Geräte werden dem Bereich „Schule“ zugeordnet.
+
+> **Entity-IDs:** Home Assistant bildet neue Entity-IDs seit Version 2026.8 aus Bereich, Gerät und Name. Neu angelegte Entitäten beginnen deshalb mit `schule_`, z. B. `sensor.schule_max_mustermann_stundenplan_heute`. Entitäten, die schon vorher existierten, behalten ihre ID ohne Präfix – bei länger bestehenden Installationen kann es also beides geben. Die Liste unten zeigt die IDs ohne Präfix für Home Assistant auf Deutsch – die tatsächlichen IDs findest du am einfachsten über das jeweilige Gerät.
 
 ### Kalender
 - `calendar.<schüler>_stundenplan` – Wöchentlicher Stundenplan mit Änderungen
@@ -78,23 +81,23 @@ Die Integration erstellt automatisch Entitäten für jeden Schüler:
 
 ### Sensoren
 - `sensor.<schüler>_aktuelle_stunde` – Aktuelle Unterrichtsstunde (Echtzeit, Minutenaktualisierung)
-- `sensor.<schüler>_schedule_today` – Stundenplan heute (mit HTML-Tabelle)
-- `sensor.<schüler>_schedule_tomorrow` – Stundenplan morgen
-- `sensor.<schüler>_schedule_changes` – Änderungen für heute/morgen
+- `sensor.<schüler>_stundenplan_heute` – Stundenplan heute (Attribute `html`, `plain` und `raw`)
+- `sensor.<schüler>_stundenplan_morgen` – Stundenplan morgen
+- `sensor.<schüler>_stundenplan_anderungen` – Änderungen für heute/morgen
 - `sensor.<schüler>_wochenplan_json` – Wochenplan als JSON (für [Stundenplan Card](https://github.com/fabel-smith/stundenplan-card))
-- `sensor.<schüler>_next_exam_days` – Tage bis zur nächsten Arbeit
-- `sensor.<schüler>_noten_<fach>` – Noten pro Fach
+- `sensor.<schüler>_tage_bis_nachste_arbeit` – Tage bis zur nächsten Arbeit
+- `sensor.<schüler>_noten_<fachkürzel>` – Noten pro Fach (z. B. `noten_ma`, `noten_de`)
 - `sensor.<schüler>_noten_gesamt` – Gesamtdurchschnitt
-
-Im Punktesystem der Oberstufe (0–15) haben die Noten-Sensoren die Einheit „Punkte“, klassische Noten (1–6) haben keine Einheit. Das Attribut `grading_system` nennt das Notensystem mit der Bezeichnung aus Schulmanager („Noten 1 bis 6“ bzw. „Notenpunkte 0 bis 15“).
 - `sensor.<schüler>_schule` – Schulname (Diagnose)
 - `sensor.<schüler>_schul_id` – Schul-ID (Diagnose)
+
+Im Punktesystem der Oberstufe (0–15) haben die Noten-Sensoren die Einheit „Punkte“, klassische Noten (1–6) haben keine Einheit. Das Attribut `grading_system` nennt das Notensystem mit der Bezeichnung aus Schulmanager („Noten 1 bis 6“ bzw. „Notenpunkte 0 bis 15“).
 
 Pro Zugang am Gerät „Schulmanager Online“:
 - **Ungelesene Elternbriefe** – Anzahl ungelesener Elternbriefe; Attribut `letters` mit `title`, `sent`, `deadline`, `students`, `text` (gekürzt) und `attachments`
 - **Ungelesene Nachrichten** – Anzahl ungelesener Messenger-Nachrichten; Attribut `threads` mit `subject`, `sender`, `recipients`, `unread` und `last`
 
-Die genaue Entity-ID dieser beiden Sensoren hängt von Sprache und Bereich ab (z. B. `sensor.schulmanager_online_ungelesene_elternbriefe` oder mit Bereich `sensor.schule_schulmanager_online_ungelesene_elternbriefe`) – am einfachsten über das Gerät „Schulmanager Online“ finden. Hat die Schule das Elternbrief- bzw. Messenger-Modul nicht freigeschaltet, wird der jeweilige Sensor nicht angelegt.
+Die Entity-IDs lauten z. B. `sensor.schule_schulmanager_online_ungelesene_elternbriefe` (bzw. ohne `schule_`, wenn sie vor Home Assistant 2026.8 angelegt wurden). Hat die Schule das Elternbrief- bzw. Messenger-Modul nicht freigeschaltet, wird der jeweilige Sensor nicht angelegt.
 
 > **Datenschutz/Lesestatus:** Für Elternbriefe wird nur die Liste *ungelesener* Briefe abgefragt (wie das Widget auf der Startseite des Portals) – kein Brief wird geöffnet. Beim Messenger werden nur Zähler und Unterhaltungen geladen, **keine Nachrichtentexte**, damit keine Lesebestätigungen ausgelöst werden. Briefinhalte, Namen und Unterhaltungen werden nicht in der Verlaufsdatenbank von Home Assistant gespeichert.
 
@@ -102,7 +105,7 @@ Die genaue Entity-ID dieser beiden Sensoren hängt von Sprache und Bereich ab (z
 - `todo.<schüler>_hausaufgaben` – Hausaufgaben mit Status-Verwaltung
 
 ### Button
-- `button.schulmanager_jetzt_aktualisieren` – Manuelle Aktualisierung
+- `button.schulmanager_online_jetzt_aktualisieren` – Manuelle Aktualisierung (am Gerät „Schulmanager Online“)
 
 ## 🔔 Ereignisse & Automatisierungen
 
@@ -114,7 +117,7 @@ trigger:
 action:
   - service: notify.mobile_app
     data:
-      message: "Neue Hausaufgabe: {{ trigger.event.data.subject }} - {{ trigger.event.data.homework }}"
+      message: "Neue Hausaufgabe für {{ trigger.event.data.student_name }}: {{ trigger.event.data.item.subject }} - {{ trigger.event.data.item.homework }}"
 ```
 
 ### Neue Noten
@@ -125,8 +128,10 @@ trigger:
 action:
   - service: notify.mobile_app
     data:
-      message: "Neue Note in {{ trigger.event.data.subject }}: {{ trigger.event.data.grade }}"
+      message: "Neue Note für {{ trigger.event.data.student_name }} in {{ trigger.event.data.subject_name }}: {{ trigger.event.data.grade.display_value }}"
 ```
+
+Beide Ereignisse enthalten `student_id` und `student_name`. `schulmanager_homework_new` liefert die Hausaufgabe unter `item` (u. a. `date`, `subject`, `homework`), `schulmanager_grade_new` zusätzlich `subject_id`, `subject_name` und unter `grade` die Note (u. a. `display_value` wie „2-“ oder „11“, `date`, `topic`).
 
 ### Stundenplan-Benachrichtigung
 ```yaml
@@ -138,22 +143,22 @@ action:
     data:
       title: "Stundenplan heute"
       message: |
-        {{ state_attr('sensor.schueler_beispiel_schedule_today', 'plain') }}
+        {{ state_attr('sensor.schueler_beispiel_stundenplan_heute', 'plain') }}
 ```
 
-Das neue `plain` Attribut enthält eine lesbare Version des Stundenplans mit Emoji-Markierung.
+Das `plain`-Attribut enthält eine lesbare Version des Stundenplans mit Emoji-Markierung.
 
 ## 📅 Stundenplan Card
 
 Mit dem `wochenplan_json`-Sensor lässt sich die [Stundenplan Card](https://github.com/fabel-smith/stundenplan-card) direkt mit Echtzeitdaten aus dem Schulmanager befüllen:
 
 1. Stundenplan Card installieren (HACS → [fabel-smith/stundenplan-card](https://github.com/fabel-smith/stundenplan-card))
-2. Karte hinzufügen → Datenquelle: **„Beliebiger Sensor (JSON)"**
-3. Sensor auswählen: `sensor.<schüler>_wochenplan_json`
+2. Karte hinzufügen → Datenquelle: **„Beliebiger Sensor (JSON)“**
+3. Sensor auswählen: `sensor.<schüler>_wochenplan_json`, Attribut: `plan`
 
-Ausfälle erscheinen als `Fach ✗`, Vertretungen als `Fach ↔`, sonstige Änderungen (geänderter Unterricht, Raumwechsel, Sonderstunde) als `Fach ⚠`. Am Wochenende wird automatisch die nächste Woche angezeigt.
+Jede Zelle enthält mehrzeilig Fach, Lehrkraft und Raum (die Karte muss Zeilenumbrüche darstellen). Änderungen werden direkt an der betroffenen Zeile markiert, der bisherige Wert steht in Klammern: `rei (ber) 🔁` bei Vertretung/Lehrkraftwechsel, `U04 (Ch) 🚪` bei Raumwechsel, `Ma (D) ⚠` bei geändertem Fach, `E ❌` bei Entfall, `M 📝` bei Prüfung. Sonderstunden und sonstige Änderungen ohne erkennbaren Unterschied erhalten ein `⚠` am Fach. Mehrere Stunden in derselben Zelle werden durch eine Leerzeile getrennt. Am Wochenende wird automatisch die nächste Woche angezeigt.
 
-## 🛠️ Services
+## 🛠️ Aktionen (Dienste)
 
 ### `schulmanager.refresh`
 Löst eine manuelle Aktualisierung aus (respektiert Cooldown).
@@ -189,7 +194,7 @@ cards:
   - type: entities
     entities:
       - sensor.schueler_beispiel_noten_gesamt
-      - sensor.schueler_beispiel_next_exam_days
+      - sensor.schueler_beispiel_tage_bis_nachste_arbeit
 ```
 
 ## ❓ Häufige Fragen
@@ -204,13 +209,13 @@ A: Ja! Ab v0.6.0 werden automatisch alle Schulen eingebunden. Jeder Schüler hat
 A: Ja! Die Integration kann mehrfach eingerichtet werden. Füge einfach die Integration erneut hinzu und verwende andere Zugangsdaten.
 
 **Q: Was bedeuten die Emojis im Stundenplan?**
-A: ❌ = Entfall, 🔁 = Vertretung/Sonderstunde/Lehrerwechsel, 🚪 = Raumwechsel, 📝 = Prüfung
+A: ❌ = Entfall, 🔁 = Vertretung/Sonderstunde/Lehrerwechsel/geänderter Unterricht, 🚪 = Raumwechsel, 📝 = Prüfung
 
 **Q: Wie oft aktualisiert die Integration?**
-A: Automatisch alle 5 Minuten. Manuelle Updates sind mit einstellbarem Cooldown (Standard: 5 Min) möglich.
+A: Automatisch einmal pro Stunde. Zusätzlich lässt sich jederzeit manuell aktualisieren (Button oder Dienst `schulmanager.refresh`), mit einstellbarer Wartezeit zwischen zwei manuellen Abrufen (Standard: 5 Min).
 
 **Q: Werden Noten im Punktesystem der gymnasialen Oberstufe (Sek II) unterstützt?**
-A: Ja, ab v0.10.0. Kurse mit dem 0–15-Punkte-System werden automatisch erkannt und korrekt dargestellt – keine Konfiguration nötig. Der Gesamtdurchschnitt berücksichtigt weiterhin nur Fächer mit klassischer 1–6-Notenskala, da beide Systeme nicht sinnvoll gemischt werden können.
+A: Ja, ab v0.10.0. Kurse mit dem 0–15-Punkte-System werden automatisch erkannt und korrekt dargestellt – keine Konfiguration nötig. Der Gesamtdurchschnitt wird im Notensystem berechnet, in dem die meisten Fächer benotet sind (beide Systeme werden nie gemischt), und trägt im Punktesystem die Einheit „Punkte“. Er ist ein einfacher Mittelwert der Kurse, keine Abitur-Prognose.
 
 **Q: Was passiert, wenn sich mein Schulmanager-Passwort ändert?**
 A: Home Assistant zeigt automatisch eine Reauth-Benachrichtigung an, über die du die neuen Zugangsdaten eingeben kannst, ohne die Integration neu einzurichten.
@@ -218,14 +223,14 @@ A: Home Assistant zeigt automatisch eine Reauth-Benachrichtigung an, über die d
 ## 🐛 Fehlersuche
 
 ### Debug-Protokollierung
-1. Einstellungen → Geräte & Dienste → Schulmanager → ⋮ → **Debug-Protokollierung aktivieren**
+1. Einstellungen → Geräte & Dienste → Schulmanager Online → ⋮ → **Debug-Protokoll aktivieren**
 2. Das Problem nachstellen (z. B. über den Button „Jetzt aktualisieren“)
-3. Debug-Protokollierung wieder deaktivieren – Home Assistant lädt das Log automatisch herunter
+3. Über dasselbe Menü **Debug-Protokoll deaktivieren** – Home Assistant lädt das Log automatisch herunter
 
 Solange die Debug-Protokollierung aktiv ist, speichert die Integration zusätzlich die API-Antworten unter `<config>/custom_components/schulmanager/debug/`. Mit dem Dienst `schulmanager.clear_debug` lassen sie sich wieder löschen.
 
 ### Diagnose-Download
-Einstellungen → Geräte & Dienste → Schulmanager → ⋮ → **Diagnose herunterladen** liefert einen Datenexport für Fehlerberichte.
+Einstellungen → Geräte & Dienste → Schulmanager Online → ⋮ → **Diagnosedaten herunterladen** liefert einen Datenexport für Fehlerberichte.
 
 ### Datenschutz bei Fehlerberichten
 Logs, Debug-Dateien und Diagnose werden automatisch pseudonymisiert: Namen der Kinder und Eltern, E-Mail-Adresse, Schüler-IDs sowie Name und Adresse der Schule erscheinen als Platzhalter wie `<Kind 1>` oder `<Schule>`. Die Diagnose enthält außerdem keine Freitexte (Elternbriefe, Hausaufgaben, Nachrichten). Debug-Dateien können in Freitexten noch Namen anderer Personen enthalten – bitte vor dem Teilen kurz durchsehen.
