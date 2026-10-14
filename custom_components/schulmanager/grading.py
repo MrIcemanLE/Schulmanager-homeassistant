@@ -14,6 +14,18 @@ from typing import Final
 GRADING_SYSTEM_CLASSIC: Final = 0
 GRADING_SYSTEM_POINTS: Final = 1
 
+# Schulmanager's own names for its grading systems (from its web app)
+GRADING_SYSTEM_LABELS: Final = {
+    GRADING_SYSTEM_CLASSIC: "Noten 1 bis 6",
+    GRADING_SYSTEM_POINTS: "Notenpunkte 0 bis 15",
+}
+POINTS_UNIT: Final = "Punkte"
+
+
+def unit_of_measurement(grading_system: int | None) -> str | None:
+    """Return the sensor unit for a grading system; classic grades have none."""
+    return POINTS_UNIT if grading_system == GRADING_SYSTEM_POINTS else None
+
 FINAL_GRADE_CATEGORY: Final = "Tendenz"
 
 

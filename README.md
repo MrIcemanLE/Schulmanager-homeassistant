@@ -67,11 +67,6 @@ Bringt Stundenplan, Arbeiten, Hausaufgaben und Noten aus Schulmanager Online dir
 | **Tage in der Vergangenheit** | 30 | Zeitraum für rückwirkend abgerufene Daten (z.B. Arbeiten/Schultermine) |
 | **Tage in der Zukunft** | 180 | Zeitraum für im Voraus abgerufene Daten (z.B. Arbeiten/Schultermine) |
 
-### Erweiterte Einstellungen
-| Parameter | Standard | Beschreibung |
-|-----------|----------|--------------|
-| **Debug-Dumps schreiben** | ❌ Aus | Speichert API-Antworten für Fehlerdiagnose |
-
 ## 📊 Entitäten
 
 Die Integration erstellt automatisch Entitäten für jeden Schüler:
@@ -90,6 +85,8 @@ Die Integration erstellt automatisch Entitäten für jeden Schüler:
 - `sensor.<schüler>_next_exam_days` – Tage bis zur nächsten Arbeit
 - `sensor.<schüler>_noten_<fach>` – Noten pro Fach
 - `sensor.<schüler>_noten_gesamt` – Gesamtdurchschnitt
+
+Im Punktesystem der Oberstufe (0–15) haben die Noten-Sensoren die Einheit „Punkte“, klassische Noten (1–6) haben keine Einheit. Das Attribut `grading_system` nennt das Notensystem mit der Bezeichnung aus Schulmanager („Noten 1 bis 6“ bzw. „Notenpunkte 0 bis 15“).
 - `sensor.<schüler>_schule` – Schulname (Diagnose)
 - `sensor.<schüler>_schul_id` – Schul-ID (Diagnose)
 
@@ -173,7 +170,7 @@ service: schulmanager.clear_cache
 ```
 
 ### `schulmanager.clear_debug`
-Löscht alle Debug-Dateien im Integrationsordner.
+Löscht alle Debug-Dateien im Integrationsordner, auch solche aus älteren Versionen. Nur für Administratoren.
 
 ```yaml
 service: schulmanager.clear_debug
@@ -220,16 +217,18 @@ A: Home Assistant zeigt automatisch eine Reauth-Benachrichtigung an, über die d
 
 ## 🐛 Fehlersuche
 
-### Debug-Dumps aktivieren
-1. Optionen → "Debug-Dumps schreiben" aktivieren
-2. Home Assistant neu starten
-3. Debug-Dateien finden unter: `<config>/custom_components/schulmanager/debug/`
+### Debug-Protokollierung
+1. Einstellungen → Geräte & Dienste → Schulmanager → ⋮ → **Debug-Protokollierung aktivieren**
+2. Das Problem nachstellen (z. B. über den Button „Jetzt aktualisieren“)
+3. Debug-Protokollierung wieder deaktivieren – Home Assistant lädt das Log automatisch herunter
 
-### Logs prüfen
-Einstellungen → System → Logs → Nach "schulmanager" filtern
+Solange die Debug-Protokollierung aktiv ist, speichert die Integration zusätzlich die API-Antworten unter `<config>/custom_components/schulmanager/debug/`. Mit dem Dienst `schulmanager.clear_debug` lassen sie sich wieder löschen.
 
 ### Diagnose-Download
-Einstellungen → Geräte & Dienste → Schulmanager → Integration → Diagnose herunterladen liefert einen anonymisierten Datenexport für Fehlerberichte.
+Einstellungen → Geräte & Dienste → Schulmanager → ⋮ → **Diagnose herunterladen** liefert einen Datenexport für Fehlerberichte.
+
+### Datenschutz bei Fehlerberichten
+Logs, Debug-Dateien und Diagnose werden automatisch pseudonymisiert: Namen der Kinder und Eltern, E-Mail-Adresse, Schüler-IDs sowie Name und Adresse der Schule erscheinen als Platzhalter wie `<Kind 1>` oder `<Schule>`. Die Diagnose enthält außerdem keine Freitexte (Elternbriefe, Hausaufgaben, Nachrichten). Debug-Dateien können in Freitexten noch Namen anderer Personen enthalten – bitte vor dem Teilen kurz durchsehen.
 
 ## 🤝 Beitragen
 

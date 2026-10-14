@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import voluptuous as vol
@@ -23,7 +22,6 @@ from .const import (
     DOMAIN,
     MAX_REFRESH_COOLDOWN,
     MIN_REFRESH_COOLDOWN,
-    OPT_DEBUG_DUMPS,
     OPT_ENABLE_EXAMS,
     OPT_ENABLE_GRADES,
     OPT_ENABLE_HOMEWORK,
@@ -37,8 +35,9 @@ from .const import (
     OPT_SCHEDULE_HIGHLIGHT,
     OPT_SCHEDULE_WEEKS,
 )
+from .privacy import get_logger
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 USER_SCHEMA = vol.Schema(
     {
@@ -56,7 +55,7 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
     # entry.version < VERSION, so a stale VERSION here silently skips all
     # pending migrations (this was the case until 2026-09-20: VERSION stayed
     # at 1 while migrations up to v3 existed but never ran).
-    VERSION = 7
+    VERSION = 8
     MINOR_VERSION = 1
 
     async def async_step_user(
@@ -77,13 +76,7 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Test the connection and get student data
         try:
-            # Enable debug dumps during config flow to help diagnose login issues
-            hub = SchulmanagerHubClient(
-                self.hass,
-                username,
-                password,
-                debug_dumps=True,
-            )
+            hub = SchulmanagerHubClient(self.hass, username, password)
 
             # Single call handles both single- and multi-school detection automatically
             await hub.async_login()
@@ -175,7 +168,6 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.hass,
                 user_input[CONF_USERNAME],
                 user_input[CONF_PASSWORD],
-                debug_dumps=False,
             )
             await hub.async_login(
                 schools=existing_schools,
@@ -315,10 +307,6 @@ class SchulmanagerOptionsFlowHandler(OptionsFlow):
                         OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT,
                         DEFAULT_OPTIONS[OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT],
                     ),
-                ): cv.boolean,
-                vol.Required(
-                    OPT_DEBUG_DUMPS,
-                    default=opts.get(OPT_DEBUG_DUMPS, DEFAULT_OPTIONS[OPT_DEBUG_DUMPS]),
                 ): cv.boolean,
             }
         )

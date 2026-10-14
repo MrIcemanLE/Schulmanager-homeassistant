@@ -1,5 +1,40 @@
 # Schulmanager Integration – Changelog
 
+## 0.11.1 (2026-10-14)
+
+**Kurz gesagt:** Namen und Kontaktdaten werden in Logs und Diagnose-Dateien automatisch durch Platzhalter ersetzt – Fehlerberichte lassen sich so deutlich unbedenklicher teilen. Debug-Dateien entstehen nur noch bei aktivierter Debug-Protokollierung. Außerdem behoben: Änderungen in den Optionen werden wieder zuverlässig übernommen, und Noten im Punktesystem tragen die Einheit „Punkte“.
+
+### 🔒 Datenschutz
+
+- **Namen und Kontaktdaten werden aus Logs und Diagnose entfernt**
+  - Namen der Kinder und Eltern, E-Mail-Adresse, Schüler-IDs sowie Name und Adresse der Schule werden in Logs, Debug-Dateien und im Diagnose-Download automatisch durch Platzhalter wie `<Kind 1>` oder `<Schule>` ersetzt
+  - Die Zuordnung bleibt erhalten (Kind 1 bleibt Kind 1), damit Fehlermeldungen weiterhin nachvollziehbar sind
+  - Der Diagnose-Download lässt zusätzlich Freitexte weg (Elternbriefe, Hausaufgaben, Nachrichten)
+  - In Home Assistant selbst ändert sich nichts – Geräte und Sensoren zeigen weiterhin die echten Namen
+
+- **Debug-Dateien nur noch bei aktivierter Debug-Protokollierung**
+  - Die Option „Debug-Dumps schreiben“ entfällt; sie war bisher standardmäßig eingeschaltet, und beim Einrichten wurden immer Debug-Dateien geschrieben
+  - Debug-Dateien entstehen jetzt nur, solange unter *Einstellungen → Geräte & Dienste → Schulmanager → ⋮ → Debug-Protokollierung aktivieren* eingeschaltet ist
+  - Ältere Debug-Dateien bleiben bestehen und können mit dem Dienst „Debug-Ordner leeren“ gelöscht werden; dieser Dienst steht jetzt nur Administratoren zur Verfügung
+
+### ✨ Verbesserungen
+
+- **Noten im Punktesystem mit Einheit**
+  - Fach- und Gesamtdurchschnitte im Punktesystem der Oberstufe (0–15) haben jetzt die Einheit „Punkte“, klassische Noten bleiben ohne Einheit
+  - Neues Attribut `grading_system` mit der Bezeichnung aus Schulmanager („Noten 1 bis 6“ bzw. „Notenpunkte 0 bis 15“)
+
+### 🐛 Bugfixes
+
+- **Änderungen in den Optionen wurden teilweise nicht übernommen**
+  - Problem: Wurde eine vorher ausgeschaltete Funktion (z. B. Hausaufgaben) eingeschaltet, schlug das Neuladen der Integration fehl; ausgeschaltete Funktionen blieben bis zum Neustart sichtbar
+  - Lösung: Optionen werden jetzt zuverlässig übernommen, ohne Neustart
+
+- **Doppelter Punkt bei der Stundennummer („5.. Std“, aus Issue #10)**
+  - Problem: Bei Schulen, die die Stundennummer als „5.“ liefern, stand im Stundenplan „5.. Std“; auch die Zuordnung der Uhrzeit im Kalender konnte fehlschlagen
+  - Lösung: Die Stundennummer wird überall einheitlich ohne Punkt verwendet
+
+---
+
 ## 0.11.0 (2026-10-14)
 
 **Kurz gesagt:** Neue Sensoren zeigen ungelesene Elternbriefe und Messenger-Nachrichten an, ohne etwas als gelesen zu markieren. Geänderte Stunden sind im Wochenplan jetzt mit ⚠ markiert, und Home Assistant wird beim Abruf nicht mehr ausgebremst.

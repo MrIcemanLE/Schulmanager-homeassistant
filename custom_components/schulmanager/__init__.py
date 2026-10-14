@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import logging
 from pathlib import Path
 import shutil
 from typing import Any
@@ -20,13 +19,13 @@ from homeassistant.helpers.entity_registry import (
     async_entries_for_config_entry,
     async_get as async_get_entity_registry,
 )
+from homeassistant.helpers.service import async_register_admin_service
 
 from .api_client import SchulmanagerHubClient
 from .const import (
     CONF_PASSWORD,
     CONF_USERNAME,
     DOMAIN,
-    OPT_DEBUG_DUMPS,
     OPT_ENABLE_EXAMS,
     OPT_ENABLE_GRADES,
     OPT_ENABLE_HOMEWORK,
@@ -36,8 +35,9 @@ from .const import (
     VERSION,
 )
 from .coordinator import SchulmanagerCoordinator
+from .privacy import get_logger
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.TODO, Platform.CALENDAR, Platform.BUTTON]
 
@@ -183,6 +183,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     - v6 -> v7: scope entity unique_ids to their config entry, so the same
       student appearing in multiple entries no longer collides
       (see _scope_unique_ids_to_entry)
+    - v7 -> v8: remove the "debug_dumps" option; dumps now follow Home
+      Assistant's debug logging toggle
     """
     version = entry.version
 
@@ -265,6 +267,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         hass.config_entries.async_update_entry(entry, version=7)
 
+    if version < 8:
+        options = {k: v for k, v in entry.options.items() if k != "debug_dumps"}
+        hass.config_entries.async_update_entry(entry, options=options, version=8)
+
     return True
 
 
@@ -302,7 +308,6 @@ def platforms_for_options(options: Mapping[str, Any]) -> list[Platform]:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Schulmanager from a config entry."""
     options = dict(entry.options)
-    debug_dumps = bool(options.get(OPT_DEBUG_DUMPS, True))
 
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
@@ -311,12 +316,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     schools = entry.data.get("schools")
     institution_id = entry.data.get("institution_id")
 
-    client = SchulmanagerHubClient(
-        hass,
-        username,
-        password,
-        debug_dumps=debug_dumps,
-    )
+    client = SchulmanagerHubClient(hass, username, password)
     await client.async_login(schools=schools, institution_id=institution_id)
 
     coordinator = SchulmanagerCoordinator(hass, client, entry)
@@ -368,35 +368,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.info("Created service device and %d student devices", len(students))
 
-    # Store runtime data on the entry per guidelines
-    entry.runtime_data = {"client": client, "coordinator": coordinator}
+    # Unload must use the platforms loaded here: on an options reload,
+    # entry.options already holds the new values.
+    platforms = platforms_for_options(options)
+    entry.runtime_data = {
+        "client": client,
+        "coordinator": coordinator,
+        "platforms": platforms,
+    }
 
     # Keep minimal mapping for domain-level services bookkeeping
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"entry": entry}
 
-    await hass.config_entries.async_forward_entry_setups(
-        entry, platforms_for_options(options)
-    )
+    await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
     # Register services
     await _async_register_services(hass)
 
-    # Add options update listener to trigger reload when settings change
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
 
 
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry when options change."""
-    await async_unload_entry(hass, entry)
-    await async_setup_entry(hass, entry)
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry so changed options take effect."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(
-        entry, platforms_for_options(entry.options)
+        entry, entry.runtime_data["platforms"]
     )
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
@@ -430,19 +432,19 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             await coordinator.async_request_manual_refresh()
 
     async def clear_debug_service(_call: ServiceCall) -> None:
-        """Clear debug files."""
-
-        for entry_data in hass.data[DOMAIN].values():
-            entry: ConfigEntry = entry_data["entry"]
-            client = entry.runtime_data["client"]
-            if client.debug_dumps:
-                debug_path = hass.config.path("custom_components", "schulmanager", "debug")
-                if Path(debug_path).exists():
-                    shutil.rmtree(debug_path)
-                    _LOGGER.info("Cleared service debug files")
+        """Delete all debug dump files, also those written by older versions."""
+        debug_path = Path(
+            hass.config.path("custom_components", "schulmanager", "debug")
+        )
+        if await hass.async_add_executor_job(debug_path.exists):
+            await hass.async_add_executor_job(shutil.rmtree, debug_path)
+            _LOGGER.info("Cleared debug files")
 
     # Register services only once
     if not hass.services.has_service(DOMAIN, "clear_cache"):
         hass.services.async_register(DOMAIN, "clear_cache", clear_cache_service)
         hass.services.async_register(DOMAIN, "refresh", refresh_service)
-        hass.services.async_register(DOMAIN, "clear_debug", clear_debug_service)
+        # Deletes files, so restricted to administrators
+        async_register_admin_service(
+            hass, DOMAIN, "clear_debug", clear_debug_service
+        )

@@ -1,4 +1,5 @@
 """Diagnostics support for the Schulmanager integration."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -8,14 +9,28 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_PASSWORD, CONF_USERNAME
+from .privacy import redact_data
 
-REDACT_KEYS = {CONF_USERNAME, CONF_PASSWORD, "jwt", "token", "authorization", "hash"}
+# unique_id is derived from the login name
+REDACT_KEYS = {
+    CONF_USERNAME,
+    CONF_PASSWORD,
+    "jwt",
+    "token",
+    "authorization",
+    "hash",
+    "unique_id",
+}
 
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
-    """Return diagnostics for a config entry with secrets redacted."""
+    """Return diagnostics with secrets redacted and personal data pseudonymized.
+
+    Free text (letters, homework, messages) is dropped: it can name people
+    the integration does not know about.
+    """
     runtime = entry.runtime_data or {}
     coordinator = runtime.get("coordinator")
     client = runtime.get("client")
@@ -39,8 +54,11 @@ async def async_get_config_entry_diagnostics(
         "service": {
             "has_token": bool(getattr(client, "_token", None)),
             "has_bundle_version": bool(getattr(client, "_bundle_version", None)),
-            "student_count": len(getattr(client, "_students", []) or []),
+            "student_count": len(client.get_all_students()) if client else 0,
         },
     }
 
-    return async_redact_data(raw, REDACT_KEYS)
+    redacted: dict[str, Any] = redact_data(
+        async_redact_data(raw, REDACT_KEYS), drop_free_text=True
+    )
+    return redacted

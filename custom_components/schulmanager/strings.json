@@ -105,8 +105,7 @@
           "refresh_cooldown": "Manual refresh cooldown (minutes, 5-30)",
           "schedule_weeks": "Schedule weeks ahead (1-3)",
           "schedule_highlight": "Use emoji highlighting for changes/cancellations",
-          "schedule_hide_cancelled_no_highlight": "Hide cancellations when highlighting is off",
-          "debug_dumps": "Write debug dumps"
+          "schedule_hide_cancelled_no_highlight": "Hide cancellations when highlighting is off"
         },
         "data_description": {
           "enable_letters": "Number and titles of unread parent letters. Letters are not opened, so they stay unread in the app.",

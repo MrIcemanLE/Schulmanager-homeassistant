@@ -15,7 +15,6 @@ from collections.abc import Callable
 from datetime import date, timedelta
 import hashlib
 import json
-import logging
 from pathlib import Path
 import re
 from typing import Any, Final, cast
@@ -25,7 +24,16 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 from . import grading
-from .lesson_info import extract_original_info
+from .lesson_info import extract_original_info, normalize_hour
+from .privacy import (
+    debug_enabled,
+    get_logger,
+    redact_data,
+    register_account,
+    register_school,
+    register_user_id,
+    safe_filename,
+)
 from .types import GradesPayload, ScheduleChange, SchedulePayload
 from .utils import common_headers, ensure_authenticated, sanitize_for_log
 
@@ -40,7 +48,7 @@ INDEX_URL = "https://login.schulmanager-online.de/"
 # as a last-resort fallback if omitting termId stops working.
 LEGACY_TERM_ID: Final = 28592
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 class ModuleUnavailableError(RuntimeError):
@@ -55,7 +63,6 @@ class SchulmanagerClient:
         hass: HomeAssistant,
         username: str,
         password: str,
-        debug_dumps: bool = False,
         institution_id: int | None = None,
         user_id: int | None = None,
     ) -> None:
@@ -67,31 +74,34 @@ class SchulmanagerClient:
         self._bundle_version: str | None = None
         self._students: list[dict[str, Any]] = []
         self._subjects_cache: dict[int, dict[str, Any]] = {}
-        self.debug_dumps = debug_dumps
         self.data: dict[str, Any] | None = None
         self._institution_id: int | None = institution_id
         self._user_id: int | None = user_id
         self._multiple_accounts: list[dict[str, Any]] | None = None
         # Optional modules that answered 403; not requested again until reload
         self._unavailable_modules: set[str] = set()
+        # Known from the config entry before the first login/log line
+        register_school(institution_id)
+        register_user_id(user_id)
 
     async def _dump(self, name: str, data: Any) -> None:
-        """Save debug data to file if debug dumps are enabled."""
-        if not self.debug_dumps:
+        """Save a pseudonymized API response while debug logging is enabled."""
+        if not debug_enabled():
             return
         lname = name.lower()
         if "response" not in lname:
             return
         base = Path(self.hass.config.path("custom_components", "schulmanager", "debug"))
         if self._institution_id is not None:
-            base = base / f"school_{self._institution_id}"
-        file_path = base / name
+            base = base / safe_filename(f"school_{self._institution_id}")
+        file_path = base / safe_filename(name)
+        redacted = redact_data(data)
 
         def _write() -> None:
             base.mkdir(parents=True, exist_ok=True)
             with file_path.open("w", encoding="utf-8") as f:
                 json.dump(
-                    {"fetched_at": dt_util.utcnow().isoformat(), "data": data},
+                    {"fetched_at": dt_util.utcnow().isoformat(), "data": redacted},
                     f,
                     ensure_ascii=False,
                     indent=2,
@@ -282,6 +292,13 @@ class SchulmanagerClient:
                     "login_response.json", {"status": resp.status, "raw": text[:500]}
                 )
                 raise RuntimeError(f"login_failed:{resp.status}")
+
+            # Before the first dump/log line that can contain these identifiers
+            if isinstance(data, dict) and isinstance(data.get("user"), dict):
+                register_account(data["user"])
+                register_school(
+                    self._institution_id or data["user"].get("institutionId")
+                )
 
             await self._dump(
                 "login_response.json",
@@ -533,7 +550,10 @@ class SchulmanagerClient:
     async def fetch_institution_info(self) -> dict[str, Any] | None:
         """Fetch the school's master data (real name, address, ...)."""
         data = await self._api_call(None, "get-institution", {}, "institution_info")
-        return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            return None
+        register_school(data.get("id") or self._institution_id, data.get("name"), data)
+        return data
 
     async def fetch_unread_letters(self) -> list[dict[str, Any]]:
         """Fetch unread parent letters (Elternbriefe) of the account.
@@ -1101,7 +1121,8 @@ class SchulmanagerClient:
             # Non-regular lessons are potential changes
             change_info = {
                 "type": change_types.get(lesson_type, lesson_type),
-                "hour": (lesson.get("classHour") or {}).get("number", "?"),
+                "hour": normalize_hour((lesson.get("classHour") or {}).get("number"))
+                or "?",
                 "date": lesson.get("date", ""),
                 "original_subject": "",
                 "new_subject": "",
@@ -1507,6 +1528,7 @@ class SchulmanagerClient:
             return {
                 "subjects": {},
                 "overall_average": None,
+                "grading_system": None,
                 "total_subjects": 0,
                 "subjects_with_grades": 0,
             }
@@ -1784,16 +1806,17 @@ class SchulmanagerClient:
                 )
 
         overall_average = None
+        overall_grading_system = None
         if averages_by_system:
             # Ties (e.g. exactly one graded subject on each scale) favor the
             # classic scale, since it is the far more common case.
-            dominant_averages = max(
+            overall_grading_system, dominant_averages = max(
                 averages_by_system.items(),
                 key=lambda system_averages: (
                     len(system_averages[1]),
                     system_averages[0] == grading.GRADING_SYSTEM_CLASSIC,
                 ),
-            )[1]
+            )
             overall_average = round(sum(dominant_averages) / len(dominant_averages), 1)
 
         return cast(
@@ -1801,6 +1824,7 @@ class SchulmanagerClient:
             {
                 "subjects": subjects,
                 "overall_average": overall_average,
+                "grading_system": overall_grading_system,
                 "total_subjects": len(subjects),
                 "subjects_with_grades": len(all_subject_averages),
             },
@@ -1971,13 +1995,11 @@ class SchulmanagerHubClient:
         hass: HomeAssistant,
         username: str,
         password: str,
-        debug_dumps: bool = False,
     ) -> None:
         """Initialize unified hub client."""
         self.hass = hass
         self.username = username
         self.password = password
-        self.debug_dumps = debug_dumps
         self._clients: dict[Any, SchulmanagerClient] = {}  # key -> client
         self._school_names: dict[Any, str] = {}  # key -> school name
         self._all_students: list[dict[str, Any]] = []
@@ -2005,7 +2027,6 @@ class SchulmanagerHubClient:
                 self.hass,
                 self.username,
                 self.password,
-                debug_dumps=self.debug_dumps,
                 institution_id=institution_id,
             )
             await probe.async_login()
@@ -2101,6 +2122,8 @@ class SchulmanagerHubClient:
             for params in candidates:
                 inst_id = params["institution_id"]
                 user_id = params["user_id"]
+                register_school(inst_id, login_label)
+                register_user_id(user_id)
                 _LOGGER.debug(
                     "Logging into school: %s (institution_id=%s, user_id=%s)",
                     login_label,
@@ -2111,8 +2134,7 @@ class SchulmanagerHubClient:
                     self.hass,
                     self.username,
                     self.password,
-                    debug_dumps=self.debug_dumps,
-                    institution_id=inst_id,
+                        institution_id=inst_id,
                     user_id=user_id,
                 )
                 try:
@@ -2306,8 +2328,8 @@ class SchulmanagerHubClient:
         return f"{value[0]}***{value[-1]}"
 
     async def _dump_summary(self, filename: str, entries: list[dict[str, Any]]) -> None:
-        """Write multi-school debug summary if dumps are enabled."""
-        if not self.debug_dumps:
+        """Write a pseudonymized multi-school summary while debug logging is enabled."""
+        if not debug_enabled():
             return
 
         base = Path(self.hass.config.path("custom_components", "schulmanager", "debug"))
@@ -2319,7 +2341,7 @@ class SchulmanagerHubClient:
                 json.dump(
                     {
                         "fetched_at": dt_util.utcnow().isoformat(),
-                        "entries": entries,
+                        "entries": redact_data(entries),
                         "total_students": len(self._all_students),
                     },
                     f,

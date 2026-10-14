@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 from typing import Any, cast
 
 from homeassistant.components.todo import TodoItem, TodoItemStatus, TodoListEntity
@@ -17,9 +16,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import SchulmanagerCoordinator
+from .privacy import get_logger
 from .util import normalize_student_slug
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 STORAGE_VERSION = 1
 STORAGE_KEY_PREFIX = f"{DOMAIN}_todo"

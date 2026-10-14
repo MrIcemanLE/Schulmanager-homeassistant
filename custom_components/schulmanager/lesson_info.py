@@ -7,6 +7,13 @@ original and actual lessons the same way.
 from typing import Any
 
 
+def normalize_hour(value: Any) -> str:
+    """Return a class hour number without the trailing dot some schools send ("5." -> "5")."""
+    if value is None:
+        return ""
+    return str(value).strip().rstrip(".").strip()
+
+
 def teacher_names(source: dict[str, Any]) -> str:
     """Return the teacher abbreviations (or names) of a lesson, comma-separated."""
     names: list[str] = []

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -33,8 +32,9 @@ from .const import (
     OPT_ENABLE_SCHEDULE,
     OPT_REFRESH_COOLDOWN,
 )
+from .privacy import debug_enabled, get_logger
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 CHROME_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -101,8 +101,7 @@ async def make_api_call(
 
             response_data = await response.json()
 
-            # Debug dump if enabled
-            if client.debug_dumps and tag:
+            if debug_enabled() and tag:
                 await client.async_dump(f"{tag}_response", response_data)
 
             return response_data

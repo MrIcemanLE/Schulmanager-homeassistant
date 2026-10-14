@@ -43,9 +43,6 @@ OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT: Final = (
     "schedule_hide_cancelled_no_highlight"
 )  # Hide cancellations when highlight is off
 
-# Debug dumps toggle
-OPT_DEBUG_DUMPS: Final = "debug_dumps"
-
 # Defaults
 DEFAULT_AUTO_UPDATE_INTERVAL: Final = 1  # hours, fixed (not user-configurable)
 DEFAULT_ENABLE_SCHEDULE: Final = True
@@ -61,7 +58,6 @@ DEFAULT_SCHEDULE_WEEKS: Final = 2  # current week + N-1 upcoming weeks
 DEFAULT_SCHEDULE_HIGHLIGHT: Final = True
 DEFAULT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT: Final = False
 
-DEFAULT_DEBUG_DUMPS: Final = True
 MIN_REFRESH_COOLDOWN: Final = 5  # Minimum 5 minutes
 MAX_REFRESH_COOLDOWN: Final = 30  # Maximum 30 minutes
 
@@ -79,7 +75,6 @@ DEFAULT_OPTIONS: Final = {
     OPT_SCHEDULE_WEEKS: DEFAULT_SCHEDULE_WEEKS,
     OPT_SCHEDULE_HIGHLIGHT: DEFAULT_SCHEDULE_HIGHLIGHT,
     OPT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT: DEFAULT_SCHEDULE_HIDE_CANCELLED_NO_HIGHLIGHT,
-    OPT_DEBUG_DUMPS: DEFAULT_DEBUG_DUMPS,
 }
 
 # Plattformen

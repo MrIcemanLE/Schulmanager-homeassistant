@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 from html import escape, unescape
-import logging
 import re
 from typing import Any, cast
 
@@ -27,11 +26,12 @@ from homeassistant.util import dt as dt_util
 from . import grading
 from .const import DOMAIN, OPT_SCHEDULE_HIGHLIGHT, VERSION
 from .coordinator import SchulmanagerCoordinator
-from .lesson_info import extract_original_info, extract_primary_info
+from .lesson_info import extract_original_info, extract_primary_info, normalize_hour
+from .privacy import get_logger
 from .types import IntegrationData
 from .util import normalize_student_slug
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 # Changes other than cancellation/substitution, marked with ⚠ in the weekly plan
 CHANGED_LESSON_TYPES = frozenset(
@@ -227,17 +227,15 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
 
         def _resolve_hour_str(lesson: dict[str, Any]) -> str:
             class_hour = lesson.get("classHour", {})
-            hour = class_hour.get("number")
-            if isinstance(hour, int):
-                return str(hour)
-            if isinstance(hour, str) and hour.strip():
-                return hour.strip()
-            for alt_key in ("hour", "lessonHour", "lessonNumber", "hourNumber"):
-                alt_val = lesson.get(alt_key)
-                if isinstance(alt_val, int):
-                    return str(alt_val)
-                if isinstance(alt_val, str) and alt_val.strip():
-                    return alt_val.strip()
+            for value in (
+                class_hour.get("number"),
+                *(
+                    lesson.get(key)
+                    for key in ("hour", "lessonHour", "lessonNumber", "hourNumber")
+                ),
+            ):
+                if isinstance(value, (int, str)) and (hour := normalize_hour(value)):
+                    return hour
             return ""
 
         def get_hour_number(lesson: dict[str, Any]) -> int:
@@ -799,6 +797,17 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         return None
 
     @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return "Punkte" for subjects graded on the 0-15 points scale."""
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        grades_data = cast(
+            dict[str, Any],
+            {} if integ is None else integ.get("grades", {}).get(self.student_id, {}),
+        )
+        subject_data = grades_data.get("subjects", {}).get(self.subject_id, {})
+        return grading.unit_of_measurement(subject_data.get("grading_system"))
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return the detailed grade information by category."""
         integ = cast(IntegrationData | None, self.coordinator.data)
@@ -923,6 +932,7 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
         return {
             "subject_name": self.subject_name,
             "subject_id": self.subject_id,
+            "grading_system": grading.GRADING_SYSTEM_LABELS.get(grading_system),
             "total_grades": total_grades,
             "grade_categories": category_summary,  # Only non-empty categories
             "statistics": statistics,
@@ -999,6 +1009,16 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
         return None
 
     @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return "Punkte" if the average is based on the 0-15 points scale."""
+        integ = cast(IntegrationData | None, self.coordinator.data)
+        grades_data = cast(
+            dict[str, Any],
+            {} if integ is None else integ.get("grades", {}).get(self.student_id, {}),
+        )
+        return grading.unit_of_measurement(grades_data.get("grading_system"))
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return the overall grade statistics."""
         integ = cast(IntegrationData | None, self.coordinator.data)
@@ -1061,6 +1081,9 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
         )
 
         return {
+            "grading_system": grading.GRADING_SYSTEM_LABELS.get(
+                grades_data.get("grading_system")
+            ),
             "total_subjects": grades_data.get("total_subjects", 0),
             "subjects_with_grades": grades_data.get("subjects_with_grades", 0),
             "subject_averages": subject_averages,
@@ -1725,7 +1748,7 @@ class WochenplanJsonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnt
                 # Schulmanager sometimes sends the period number with a
                 # trailing "." (e.g. "4."); normalize it once here so sorting
                 # and the "Stunde" label below don't inherit a stray dot.
-                period_num = str(ch.get("number", "?")).rstrip(".")
+                period_num = normalize_hour(ch.get("number", "?"))
                 if period_num not in periods:
                     periods[period_num] = {}
                     period_times[period_num] = (

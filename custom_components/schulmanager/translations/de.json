@@ -105,8 +105,7 @@
           "refresh_cooldown": "Abkühlzeit für manuelle Aktualisierung (Minuten, 5-30)",
           "schedule_weeks": "Stundenplan Wochen im Voraus (1-3)",
           "schedule_highlight": "Emoji-Hervorhebung für Änderungen/Ausfälle verwenden",
-          "schedule_hide_cancelled_no_highlight": "Ausfälle ausblenden, wenn Hervorhebung aus ist",
-          "debug_dumps": "Debug-Dumps schreiben"
+          "schedule_hide_cancelled_no_highlight": "Ausfälle ausblenden, wenn Hervorhebung aus ist"
         },
         "data_description": {
           "enable_letters": "Anzahl und Titel ungelesener Elternbriefe. Briefe werden nicht geöffnet und bleiben in der App ungelesen.",

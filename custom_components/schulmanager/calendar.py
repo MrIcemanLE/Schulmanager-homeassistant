@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from logging import getLogger
 from typing import Any, cast
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
@@ -19,9 +18,11 @@ from .const import (
     OPT_SCHEDULE_HIGHLIGHT,
 )
 from .coordinator import SchulmanagerCoordinator
+from .lesson_info import normalize_hour
+from .privacy import get_logger
 from .util import normalize_student_slug
 
-_LOGGER = getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 async def async_setup_entry(
@@ -259,8 +260,8 @@ class ExamCalendarBase(CalendarEntity):
             parts.append(f"Thema: {comment}")
 
         hour_info = exam.get("startClassHour") or {}
-        number = hour_info.get("number")
-        if number is not None:
+        number = normalize_hour(hour_info.get("number"))
+        if number:
             time_info = f"Stunde {number}"
             hour_from = hour_info.get("from")
             hour_until = hour_info.get("until")
@@ -359,8 +360,8 @@ class SchoolEventsCalendar(ExamCalendarBase):
 
         if "startClassHour" in exam:
             hour_info = exam["startClassHour"]
-            if "number" in hour_info:
-                time_info = f"Stunde {hour_info['number']}"
+            if number := normalize_hour(hour_info.get("number")):
+                time_info = f"Stunde {number}"
                 if "from" in hour_info and "until" in hour_info:
                     time_info += (
                         f" ({hour_info['from'][:5]} - {hour_info['until'][:5]})"
@@ -450,8 +451,8 @@ class ScheduleCalendar(CalendarEntity):
         groups: dict[str, list[dict]] = {}
         for i, lesson in enumerate(lessons):
             ch = (lesson.get("classHour") or {})
-            num = ch.get("number")
-            key = str(num) if num is not None else f"idx_{i}"
+            num = normalize_hour(ch.get("number"))
+            key = num or f"idx_{i}"
             groups.setdefault(key, []).append(lesson)
 
         # Helper to format original (cancelled) info
@@ -525,7 +526,7 @@ class ScheduleCalendar(CalendarEntity):
                     10: ("15:45:00", "16:30:00"),
                 }
                 try:
-                    num = int(number)
+                    num = int(normalize_hour(number))
                     mapped = hour_times.get(num)
                     if mapped:
                         start_time, end_time = mapped

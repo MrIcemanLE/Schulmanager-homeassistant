@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import timedelta
-import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.config_entries import ConfigEntry
@@ -21,6 +20,7 @@ from .const import (
     OPT_RANGE_PAST_DAYS,
     OPT_SCHEDULE_WEEKS,
 )
+from .privacy import get_logger
 from .types import IntegrationData
 from .utils import (
     CooldownManager,
@@ -28,7 +28,7 @@ from .utils import (
     get_validated_auto_update_interval,
 )
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
     """Coordinator for Schulmanager integration with cooldown support."""

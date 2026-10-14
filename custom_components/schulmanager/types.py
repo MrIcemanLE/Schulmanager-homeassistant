@@ -76,6 +76,8 @@ class GradesPayload(TypedDict):
 
     subjects: dict[int, SubjectGrades]
     overall_average: float | None
+    # Grading system the overall average is based on (None without grades)
+    grading_system: int | None
     total_subjects: int
     subjects_with_grades: int
 
