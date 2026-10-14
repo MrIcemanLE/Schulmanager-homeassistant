@@ -1,0 +1,50 @@
+name: Funktion vorschlagen
+description: Idee für eine neue Funktion oder Verbesserung
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Danke für deine Idee! Die Integration kann nur Daten nutzen, die auch im Schulmanager-Portal bzw. in der App für deinen Zugang sichtbar sind.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Was möchtest du erreichen?
+      description: Welches Problem soll gelöst werden, bzw. was fehlt dir? Wofür würdest du es in Home Assistant nutzen?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Wie könnte es aussehen?
+      description: Z. B. neuer Sensor, Kalender, Attribut, Benachrichtigung oder Option.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Betroffener Bereich
+      multiple: true
+      options:
+        - Stundenplan
+        - Arbeiten / Schultermine
+        - Hausaufgaben
+        - Noten
+        - Elternbriefe / Nachrichten
+        - Weiteres Schulmanager-Modul
+        - Sonstiges
+  - type: textarea
+    id: portal
+    attributes:
+      label: Wo findest du die Daten im Schulmanager?
+      description: Name des Moduls bzw. Menüpunkts im Portal oder in der App. Ein Screenshot (ohne persönliche Daten) hilft sehr.
+  - type: textarea
+    id: context
+    attributes:
+      label: Weitere Informationen
+      description: Alternativen, die du schon probiert hast, oder sonstige Hinweise.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Datenschutz
+      options:
+        - label: Ich habe meine Angaben und Screenshots auf persönliche Daten geprüft.
+          required: true

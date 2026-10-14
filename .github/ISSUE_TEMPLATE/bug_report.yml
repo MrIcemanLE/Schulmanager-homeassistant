@@ -1,0 +1,90 @@
+name: Fehler melden
+description: Etwas funktioniert nicht wie erwartet
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Danke, dass du einen Fehler meldest! Je genauer die Angaben, desto schneller lässt er sich finden.
+
+        **Bitte keine persönlichen Daten posten** (Namen, E-Mail-Adresse, Zugangsdaten, Noten mit Namen).
+  - type: textarea
+    id: description
+    attributes:
+      label: Was ist passiert?
+      description: Beschreibe den Fehler. Was hast du erwartet, was ist stattdessen passiert?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Schritte zum Nachstellen
+      description: Wie lässt sich der Fehler auslösen?
+      placeholder: |
+        1. …
+        2. …
+  - type: dropdown
+    id: area
+    attributes:
+      label: Betroffener Bereich
+      multiple: true
+      options:
+        - Einrichtung / Anmeldung
+        - Stundenplan (Kalender, Sensoren, Wochenplan)
+        - Arbeiten / Schultermine
+        - Hausaufgaben
+        - Noten
+        - Elternbriefe / Nachrichten
+        - Benachrichtigungen / Ereignisse
+        - Sonstiges
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Version der Integration
+      description: Zu finden in HACS oder unter Einstellungen → Geräte & Dienste → Schulmanager Online.
+      placeholder: z. B. 0.11.1
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home-Assistant-Version
+      description: Zu finden unter Einstellungen → Über.
+      placeholder: z. B. 2026.10.1
+    validations:
+      required: true
+  - type: dropdown
+    id: account
+    attributes:
+      label: Art des Zugangs
+      options:
+        - Eltern-Zugang, eine Schule
+        - Eltern-Zugang, Kinder an mehreren Schulen
+        - Schüler-Zugang
+        - Weiß ich nicht
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log
+      description: |
+        So bekommst du ein aussagekräftiges Log:
+        1. Einstellungen → Geräte & Dienste → Schulmanager Online → ⋮ → **Debug-Protokoll aktivieren**
+        2. Den Fehler nachstellen (z. B. über den Button „Jetzt aktualisieren“)
+        3. Über dasselbe Menü **Debug-Protokoll deaktivieren** – das Log wird heruntergeladen
+
+        Namen, E-Mail-Adresse und Schuldaten werden darin automatisch durch Platzhalter ersetzt. Bitte vor dem Einfügen trotzdem kurz durchsehen. Die relevanten Zeilen genügen.
+      render: text
+  - type: textarea
+    id: context
+    attributes:
+      label: Weitere Informationen
+      description: Screenshots, Diagnosedaten (Einstellungen → Geräte & Dienste → Schulmanager Online → ⋮ → Diagnosedaten herunterladen) oder sonstige Hinweise.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Datenschutz
+      options:
+        - label: Ich habe meine Angaben, Logs und Screenshots auf persönliche Daten geprüft.
+          required: true

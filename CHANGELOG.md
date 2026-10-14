@@ -14,7 +14,7 @@
 
 - **Debug-Dateien nur noch bei aktivierter Debug-Protokollierung**
   - Die Option „Debug-Dumps schreiben“ entfällt; sie war bisher standardmäßig eingeschaltet, und beim Einrichten wurden immer Debug-Dateien geschrieben
-  - Debug-Dateien entstehen jetzt nur, solange unter *Einstellungen → Geräte & Dienste → Schulmanager → ⋮ → Debug-Protokollierung aktivieren* eingeschaltet ist
+  - Debug-Dateien entstehen jetzt nur, solange unter *Einstellungen → Geräte & Dienste → Schulmanager Online → ⋮ → Debug-Protokoll aktivieren* eingeschaltet ist
   - Ältere Debug-Dateien bleiben bestehen und können mit dem Dienst „Debug-Ordner leeren“ gelöscht werden; dieser Dienst steht jetzt nur Administratoren zur Verfügung
 
 ### ✨ Verbesserungen
