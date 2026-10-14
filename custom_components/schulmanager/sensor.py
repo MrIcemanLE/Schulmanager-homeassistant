@@ -33,7 +33,7 @@ from .util import normalize_student_slug
 
 _LOGGER = get_logger(__name__)
 
-# Changes other than cancellation/substitution, marked with ⚠ in the weekly plan
+# Changes other than cancellation/substitution, marked with ⚠️ in the weekly plan
 CHANGED_LESSON_TYPES = frozenset(
     {"changedLesson", "roomChange", "specialLesson", "irregularLesson"}
 )
@@ -50,6 +50,14 @@ LESSON_TYPE_LABELS: dict[str, str] = {
     "event": "Veranstaltung",
     "exam": "Prüfung",
 }
+
+# Weekly plan cell markers, same symbols as the schedule calendar
+MARKER_CANCELLED = "❌"
+MARKER_TEACHER = "🔁"
+MARKER_ROOM = "🚪"
+MARKER_EXAM = "📝"
+# With VS16 so it renders as emoji instead of the text glyph
+MARKER_CHANGED = "⚠️"
 
 HIGHLIGHT_ROW_ATTR = " bgcolor="  # cfe8ff""
 
@@ -1800,37 +1808,95 @@ class WochenplanJsonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnt
 
     @staticmethod
     def _subject_label(lesson: dict[str, Any]) -> str:
-        """Return a human-readable label for a lesson cell."""
+        """Return a multiline cell: subject, teacher and room.
+
+        Change markers sit on the affected line and the previous value follows
+        in brackets, e.g. "rei (ber) 🔁" for a new teacher or "U04 (Ch) 🚪" for
+        a new room. A changed subject is marked on the subject line with ⚠️.
+        """
         lesson_type = lesson.get("type", "regularLesson")
-        actual = lesson.get("actualLesson") or {}
-        subject_abbr = (actual.get("subject") or {}).get("abbreviation", "")
+        current = extract_primary_info(lesson)
+        subject, teacher, room = current["subject"], current["teacher"], current["room"]
+        original = extract_original_info(lesson)
 
         if lesson_type == "cancelledLesson":
-            orig_lessons = lesson.get("originalLessons") or []
-            orig_abbr = (orig_lessons[0].get("subject") or {}).get("abbreviation", "?") if orig_lessons else "?"
-            return f"{orig_abbr} ✗"
+            return "\n".join(
+                value
+                for value in (
+                    f"{original['subject'] or '?'} {MARKER_CANCELLED}",
+                    original["teacher"],
+                    original["room"],
+                )
+                if value
+            )
 
-        if lesson_type in ("substitution", "teacherChange"):
-            return f"{subject_abbr} ↔" if subject_abbr else "↔"
+        subject_changed = bool(
+            original["subject"] and subject and original["subject"] != subject
+        )
+        teacher_changed = lesson_type in ("substitution", "teacherChange") or bool(
+            original["teacher"] and teacher and original["teacher"] != teacher
+        )
+        room_changed = lesson_type == "roomChange" or bool(
+            original["room"] and room and original["room"] != room
+        )
 
-        if lesson_type in CHANGED_LESSON_TYPES:
-            return f"{subject_abbr or LESSON_TYPE_LABELS.get(lesson_type, lesson_type)} ⚠"
-
-        if not subject_abbr and lesson_type not in ("regularLesson", ""):
+        if not subject and lesson_type not in ("regularLesson", ""):
             # e.g. type "event" typically has no actualLesson.subject - fall
             # back to the known German type label instead of an empty cell.
-            return LESSON_TYPE_LABELS.get(lesson_type, lesson_type)
+            subject = LESSON_TYPE_LABELS.get(lesson_type, lesson_type)
 
-        return subject_abbr
+        subject_markers: list[str] = []
+        if lesson_type == "exam":
+            subject_markers.append(MARKER_EXAM)
+        elif subject_changed:
+            subject = f"{subject} ({original['subject']})"
+            subject_markers.append(MARKER_CHANGED)
+        # Without a teacher/room line the change marker moves to the subject
+        # so the change is never lost (issue #12).
+        if teacher_changed and not teacher:
+            subject_markers.append(MARKER_TEACHER)
+        if room_changed and not room:
+            subject_markers.append(MARKER_ROOM)
+        if (
+            lesson_type in CHANGED_LESSON_TYPES
+            and not subject_markers
+            and not (teacher_changed or room_changed)
+        ):
+            # Changed lesson without a visible difference in subject, teacher
+            # or room (e.g. special lesson, note only): still flag it.
+            subject_markers.append(MARKER_CHANGED)
+        if subject_markers:
+            subject = " ".join(filter(None, (subject, *subject_markers)))
+
+        if teacher and teacher_changed:
+            teacher = WochenplanJsonSensor._mark_change(
+                teacher, original["teacher"], MARKER_TEACHER
+            )
+        if room and room_changed:
+            room = WochenplanJsonSensor._mark_change(
+                room, original["room"], MARKER_ROOM
+            )
+
+        return "\n".join(value for value in (subject, teacher, room) if value)
+
+    @staticmethod
+    def _mark_change(value: str, previous: str, marker: str) -> str:
+        """Return the value with the previous one in brackets and the marker."""
+        if previous and previous != value:
+            return f"{value} ({previous}) {marker}"
+        return f"{value} {marker}"
 
     @staticmethod
     def _combine_subject_labels(lessons: list[dict[str, Any]]) -> str:
-        """Combine same-hour lessons into one cell label.
+        """Combine same-hour lessons into one cell.
 
         A cancelled lesson and its same-hour substitution/event previously
-        overwrote each other (only the last-processed one survived); both
-        are now shown, e.g. "Bio ✗ → Veranstaltung".
+        overwrote each other (only the last-processed one survived); all of
+        them are now shown, cancelled lessons first. An empty line separates
+        the blocks so the card renders them one below the other.
         """
+        if not lessons:
+            return ""
         if len(lessons) == 1:
             return WochenplanJsonSensor._subject_label(lessons[0])
 
@@ -1843,7 +1909,7 @@ class WochenplanJsonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnt
         ]
         # Keep order, drop empties and exact duplicates.
         unique_labels = list(dict.fromkeys(label for label in labels if label))
-        return " → ".join(unique_labels)
+        return "\n\n".join(unique_labels)
 
 
 def _service_device_info(coordinator: SchulmanagerCoordinator) -> DeviceInfo:

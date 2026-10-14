@@ -156,7 +156,7 @@ Mit dem `wochenplan_json`-Sensor lässt sich die [Stundenplan Card](https://gith
 2. Karte hinzufügen → Datenquelle: **„Beliebiger Sensor (JSON)“**
 3. Sensor auswählen: `sensor.<schüler>_wochenplan_json`, Attribut: `plan`
 
-Ausfälle erscheinen als `Fach ✗`, Vertretungen als `Fach ↔`, sonstige Änderungen (geänderter Unterricht, Raumwechsel, Sonderstunde) als `Fach ⚠`. Am Wochenende wird automatisch die nächste Woche angezeigt.
+Jede Zelle enthält mehrzeilig Fach, Lehrkraft und Raum (die Karte muss Zeilenumbrüche darstellen). Änderungen werden direkt an der betroffenen Zeile markiert, der bisherige Wert steht in Klammern: `rei (ber) 🔁` bei Vertretung/Lehrkraftwechsel, `U04 (Ch) 🚪` bei Raumwechsel, `Ma (D) ⚠️` bei geändertem Fach, `E ❌` bei Entfall, `M 📝` bei Prüfung. Sonderstunden und sonstige Änderungen ohne erkennbaren Unterschied erhalten ein `⚠️` am Fach. Fehlt die Lehrkraft- bzw. Raumangabe, steht `🔁` bzw. `🚪` am Fach. Mehrere Stunden in derselben Zelle werden durch eine Leerzeile getrennt. Am Wochenende wird automatisch die nächste Woche angezeigt.
 
 ## 🛠️ Aktionen (Dienste)
 

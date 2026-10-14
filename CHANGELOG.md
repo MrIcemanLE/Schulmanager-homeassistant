@@ -1,5 +1,24 @@
 # Schulmanager Integration – Changelog
 
+## 0.12.0 (2026-10-14)
+
+**Kurz gesagt:** Der Wochenplan für die Stundenplan Card zeigt jetzt Fach, Lehrkraft und Raum untereinander und markiert Änderungen genau dort, wo sie passieren – mit dem bisherigen Wert in Klammern. Die Markierungen sind dieselben Emojis wie im Kalender.
+
+### ✨ Verbesserungen
+
+- **Ausführlicherer Wochenplan (Sensor „Wochenplan JSON“, Danke an @KoenigMjr, PR #15)**
+  - Jede Zelle enthält mehrzeilig Fach, Lehrkraft und Raum statt nur des Fachkürzels
+  - Änderungen werden an der betroffenen Zeile markiert, der bisherige Wert steht in Klammern: `rei (ber) 🔁` bei Vertretung/Lehrkraftwechsel, `U04 (Ch) 🚪` bei Raumwechsel, `Ma (D) ⚠️` bei geändertem Fach, `E ❌` bei Entfall (mit Lehrkraft und Raum der entfallenen Stunde), `M 📝` bei Prüfung
+  - Sonderstunden und sonstige Änderungen ohne erkennbaren Unterschied erhalten weiterhin ein `⚠️` am Fach; fehlt die Angabe zu Lehrkraft oder Raum, steht `🔁` bzw. `🚪` direkt am Fach
+  - Mehrere Stunden in derselben Zelle werden durch eine Leerzeile getrennt, Entfälle stehen zuerst
+
+### ⚠️ Geändertes Format
+
+- Die Markierungen im Wochenplan ändern sich von `✗` / `↔` / `⚠` zu `❌` / `🔁` / `🚪` / `📝` / `⚠️`, mehrere Stunden pro Zelle werden nicht mehr mit ` → ` verbunden. Wer eigene Vorlagen oder Styles auf die alten Zeichen gebaut hat, muss sie anpassen.
+- Die Stundenplan Card stellt die mehrzeiligen Zellen in der aktuellen Version korrekt dar. Entity-ID und Attribut `plan` bleiben unverändert.
+
+---
+
 ## 0.11.1 (2026-10-14)
 
 **Kurz gesagt:** Namen und Kontaktdaten werden in Logs und Diagnose-Dateien automatisch durch Platzhalter ersetzt – Fehlerberichte lassen sich so deutlich unbedenklicher teilen. Debug-Dateien entstehen nur noch bei aktivierter Debug-Protokollierung. Außerdem behoben: Änderungen in den Optionen werden wieder zuverlässig übernommen, und Noten im Punktesystem tragen die Einheit „Punkte“.
