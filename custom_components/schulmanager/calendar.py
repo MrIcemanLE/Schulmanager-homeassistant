@@ -564,7 +564,13 @@ class ScheduleCalendar(CalendarEntity):
         if self.highlight:
             if lesson_type == "cancelledLesson":
                 emoji = "❌ "
-            elif lesson_type in {"substitution", "specialLesson", "teacherChange", "irregularLesson"}:
+            elif lesson_type in {
+                "substitution",
+                "specialLesson",
+                "teacherChange",
+                "irregularLesson",
+                "changedLesson",
+            }:
                 emoji = "🔁 "
             elif lesson_type == "roomChange":
                 emoji = "🚪 "

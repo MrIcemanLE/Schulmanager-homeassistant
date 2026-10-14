@@ -29,6 +29,15 @@
       },
       "school": {
         "name": "Schule"
+      },
+      "school_id": {
+        "name": "Schul-ID"
+      },
+      "letters_unread": {
+        "name": "Ungelesene Elternbriefe"
+      },
+      "messages_unread": {
+        "name": "Ungelesene Nachrichten"
       }
     },
     "todo": {
@@ -89,6 +98,8 @@
           "enable_schedule": "Stundenplan abrufen",
           "enable_exams": "Arbeiten abrufen",
           "enable_grades": "Noten abrufen",
+          "enable_letters": "Ungelesene Elternbriefe abrufen",
+          "enable_messages": "Ungelesene Nachrichten abrufen",
           "range_past_days": "Tage in der Vergangenheit",
           "range_future_days": "Tage in der Zukunft",
           "refresh_cooldown": "Abkühlzeit für manuelle Aktualisierung (Minuten, 5-30)",
@@ -96,6 +107,10 @@
           "schedule_highlight": "Emoji-Hervorhebung für Änderungen/Ausfälle verwenden",
           "schedule_hide_cancelled_no_highlight": "Ausfälle ausblenden, wenn Hervorhebung aus ist",
           "debug_dumps": "Debug-Dumps schreiben"
+        },
+        "data_description": {
+          "enable_letters": "Anzahl und Titel ungelesener Elternbriefe. Briefe werden nicht geöffnet und bleiben in der App ungelesen.",
+          "enable_messages": "Anzahl ungelesener Nachrichten und betroffene Unterhaltungen. Nachrichtentexte werden nicht geladen, es werden keine Lesebestätigungen ausgelöst."
         }
       }
     }

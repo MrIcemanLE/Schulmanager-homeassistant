@@ -11,6 +11,7 @@ Bringt Stundenplan, Arbeiten, Hausaufgaben und Noten aus Schulmanager Online dir
 - **📝 Hausaufgaben** – Als To‑Do‑Listen mit Status-Verwaltung
 - **🧮 Noten** – Pro Fach und Gesamtdurchschnitt mit detaillierten Zusammenfassungen, inkl. Punktesystem der gymnasialen Oberstufe (Sek II, 0–15 Punkte)
 - **🔔 Ereignisse** – Bei neuen Hausaufgaben oder Noten
+- **✉️ Elternbriefe & Nachrichten** – Anzahl ungelesener Elternbriefe und Messenger-Nachrichten (ohne etwas als gelesen zu markieren)
 - **🏫 Multi-School Support** – Automatische Verwaltung bei Kindern an mehreren Schulen
 
 ## 🔧 Installation
@@ -49,12 +50,14 @@ Bringt Stundenplan, Arbeiten, Hausaufgaben und Noten aus Schulmanager Online dir
 | **Arbeiten abrufen** | ✅ Ein | Kalender für Klausuren/Tests |
 | **Hausaufgaben abrufen** | ✅ Ein | To-Do-Listen für Hausaufgaben |
 | **Noten abrufen** | ✅ Ein | Noten-Sensoren pro Fach und Gesamtdurchschnitt |
+| **Ungelesene Elternbriefe abrufen** | ✅ Ein | Sensor mit Anzahl und Details ungelesener Elternbriefe |
+| **Ungelesene Nachrichten abrufen** | ✅ Ein | Sensor mit Anzahl ungelesener Messenger-Nachrichten und betroffenen Unterhaltungen |
 
 ### Stundenplan-Einstellungen
 | Parameter | Standard | Beschreibung |
 |-----------|----------|--------------|
 | **Stundenplan Wochen im Voraus** | 2 | Wie viele Wochen im Voraus geladen werden (1-3) |
-| **Emoji-Hervorhebung** | ✅ Ein | Markiert Änderungen: ❌ Entfall, 🔁 Vertretung, 🚪 Raumwechsel, 📝 Prüfung |
+| **Emoji-Hervorhebung** | ✅ Ein | Markiert Änderungen: ❌ Entfall, 🔁 Vertretung/geänderter Unterricht, 🚪 Raumwechsel, 📝 Prüfung |
 | **Ausfälle ausblenden** | ❌ Aus | Versteckt Ausfälle wenn Emoji-Hervorhebung deaktiviert ist |
 
 ### Aktualisierung
@@ -87,7 +90,16 @@ Die Integration erstellt automatisch Entitäten für jeden Schüler:
 - `sensor.<schüler>_next_exam_days` – Tage bis zur nächsten Arbeit
 - `sensor.<schüler>_noten_<fach>` – Noten pro Fach
 - `sensor.<schüler>_noten_gesamt` – Gesamtdurchschnitt
-- `sensor.<schüler>_schule` – Schulzugehörigkeit (bei Multi-School)
+- `sensor.<schüler>_schule` – Schulname (Diagnose)
+- `sensor.<schüler>_schul_id` – Schul-ID (Diagnose)
+
+Pro Zugang am Gerät „Schulmanager Online“:
+- **Ungelesene Elternbriefe** – Anzahl ungelesener Elternbriefe; Attribut `letters` mit `title`, `sent`, `deadline`, `students`, `text` (gekürzt) und `attachments`
+- **Ungelesene Nachrichten** – Anzahl ungelesener Messenger-Nachrichten; Attribut `threads` mit `subject`, `sender`, `recipients`, `unread` und `last`
+
+Die genaue Entity-ID dieser beiden Sensoren hängt von Sprache und Bereich ab (z. B. `sensor.schulmanager_online_ungelesene_elternbriefe` oder mit Bereich `sensor.schule_schulmanager_online_ungelesene_elternbriefe`) – am einfachsten über das Gerät „Schulmanager Online“ finden. Hat die Schule das Elternbrief- bzw. Messenger-Modul nicht freigeschaltet, wird der jeweilige Sensor nicht angelegt.
+
+> **Datenschutz/Lesestatus:** Für Elternbriefe wird nur die Liste *ungelesener* Briefe abgefragt (wie das Widget auf der Startseite des Portals) – kein Brief wird geöffnet. Beim Messenger werden nur Zähler und Unterhaltungen geladen, **keine Nachrichtentexte**, damit keine Lesebestätigungen ausgelöst werden. Briefinhalte, Namen und Unterhaltungen werden nicht in der Verlaufsdatenbank von Home Assistant gespeichert.
 
 ### To-Do Listen
 - `todo.<schüler>_hausaufgaben` – Hausaufgaben mit Status-Verwaltung
@@ -142,7 +154,7 @@ Mit dem `wochenplan_json`-Sensor lässt sich die [Stundenplan Card](https://gith
 2. Karte hinzufügen → Datenquelle: **„Beliebiger Sensor (JSON)"**
 3. Sensor auswählen: `sensor.<schüler>_wochenplan_json`
 
-Ausfälle erscheinen als `Fach ✗`, Vertretungen als `Fach ↔`. Am Wochenende wird automatisch die nächste Woche angezeigt.
+Ausfälle erscheinen als `Fach ✗`, Vertretungen als `Fach ↔`, sonstige Änderungen (geänderter Unterricht, Raumwechsel, Sonderstunde) als `Fach ⚠`. Am Wochenende wird automatisch die nächste Woche angezeigt.
 
 ## 🛠️ Services
 

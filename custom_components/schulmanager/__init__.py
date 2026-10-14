@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 from pathlib import Path
 import shutil
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -28,6 +30,8 @@ from .const import (
     OPT_ENABLE_EXAMS,
     OPT_ENABLE_GRADES,
     OPT_ENABLE_HOMEWORK,
+    OPT_ENABLE_LETTERS,
+    OPT_ENABLE_MESSAGES,
     OPT_ENABLE_SCHEDULE,
     VERSION,
 )
@@ -129,7 +133,7 @@ def _scope_unique_ids_to_entry(
     """Rewrite this entry's entity unique_ids to include the entry_id.
 
     Every entity's unique_id used to be built purely from the studentId
-    (e.g. "schulmanager_5377231_grades_overall"). That collides whenever the
+    (e.g. "schulmanager_1234567_grades_overall"). That collides whenever the
     same student is reachable from two config entries at once - e.g. a
     parent account and that student's own login, or two parents each with
     their own account - because Home Assistant requires unique_ids to be
@@ -264,16 +268,41 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def platforms_for_options(options: Mapping[str, Any]) -> list[Platform]:
+    """Return the platforms needed for the enabled features."""
+    enabled = {
+        key: bool(options.get(key, True))
+        for key in (
+            OPT_ENABLE_HOMEWORK,
+            OPT_ENABLE_SCHEDULE,
+            OPT_ENABLE_EXAMS,
+            OPT_ENABLE_GRADES,
+            OPT_ENABLE_LETTERS,
+            OPT_ENABLE_MESSAGES,
+        )
+    }
+    platforms = []
+    if (
+        enabled[OPT_ENABLE_SCHEDULE]
+        or enabled[OPT_ENABLE_EXAMS]
+        or enabled[OPT_ENABLE_GRADES]
+        or enabled[OPT_ENABLE_LETTERS]
+        or enabled[OPT_ENABLE_MESSAGES]
+    ):
+        platforms.append(Platform.SENSOR)
+    if enabled[OPT_ENABLE_HOMEWORK]:
+        platforms.append(Platform.TODO)
+    if enabled[OPT_ENABLE_EXAMS] or enabled[OPT_ENABLE_SCHEDULE]:
+        platforms.append(Platform.CALENDAR)
+    # Always loaded for the manual refresh button
+    platforms.append(Platform.BUTTON)
+    return platforms
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Schulmanager from a config entry."""
     options = dict(entry.options)
     debug_dumps = bool(options.get(OPT_DEBUG_DUMPS, True))
-
-    # Get enabled features from options
-    enable_homework = bool(options.get(OPT_ENABLE_HOMEWORK, True))
-    enable_schedule = bool(options.get(OPT_ENABLE_SCHEDULE, True))
-    enable_exams = bool(options.get(OPT_ENABLE_EXAMS, True))
-    enable_grades = bool(options.get(OPT_ENABLE_GRADES, True))
 
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
@@ -327,16 +356,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             model="Schüler",
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
-            # Link student to service device
-            via_device=(DOMAIN, f"service_{entry.entry_id}"),
-        )
-
-        # Ensure the device is properly linked to the service device and config entry
-        device_registry.async_update_device(
-            student_device.id,
             via_device_id=service_device.id,
         )
-        _LOGGER.info("Student device %s updated with via_device_id: %s", student_device.name, service_device.id)
 
         # If device was orphaned, make sure it's properly linked to this config entry
         if entry.entry_id not in student_device.config_entries:
@@ -353,24 +374,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Keep minimal mapping for domain-level services bookkeeping
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"entry": entry}
 
-    # Set up platforms based on enabled features
-    platforms_to_load = []
-
-    # Load sensors when any sensor-producing feature is enabled
-    if enable_schedule or enable_exams or enable_grades:
-        platforms_to_load.append(Platform.SENSOR)
-
-    if enable_homework:
-        platforms_to_load.append(Platform.TODO)  # Homework todo lists
-
-    if enable_exams or enable_schedule:
-        platforms_to_load.append(Platform.CALENDAR)  # Exam and/or schedule calendar
-
-    # Always load button for manual refresh
-    platforms_to_load.append(Platform.BUTTON)
-
-    if platforms_to_load:
-        await hass.config_entries.async_forward_entry_setups(entry, platforms_to_load)
+    await hass.config_entries.async_forward_entry_setups(
+        entry, platforms_for_options(options)
+    )
 
     # Register services
     await _async_register_services(hass)
@@ -389,28 +395,8 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    options = dict(entry.options)
-    enable_homework = bool(options.get(OPT_ENABLE_HOMEWORK, True))
-    enable_schedule = bool(options.get(OPT_ENABLE_SCHEDULE, True))
-    enable_exams = bool(options.get(OPT_ENABLE_EXAMS, True))
-    enable_grades = bool(options.get(OPT_ENABLE_GRADES, True))
-
-    platforms_to_unload = []
-
-    # Unload sensors if any of their contributing features were enabled
-    if enable_schedule or enable_exams or enable_grades:
-        platforms_to_unload.append(Platform.SENSOR)
-
-    if enable_homework:
-        platforms_to_unload.append(Platform.TODO)
-
-    if enable_exams or enable_schedule:
-        platforms_to_unload.append(Platform.CALENDAR)
-
-    platforms_to_unload.append(Platform.BUTTON)
-
     unload_ok = await hass.config_entries.async_unload_platforms(
-        entry, platforms_to_unload
+        entry, platforms_for_options(entry.options)
     )
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)

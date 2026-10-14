@@ -19,6 +19,8 @@ from .const import (
     DEFAULT_ENABLE_EXAMS,
     DEFAULT_ENABLE_GRADES,
     DEFAULT_ENABLE_HOMEWORK,
+    DEFAULT_ENABLE_LETTERS,
+    DEFAULT_ENABLE_MESSAGES,
     DEFAULT_ENABLE_SCHEDULE,
     DEFAULT_REFRESH_COOLDOWN,
     MAX_REFRESH_COOLDOWN,
@@ -26,6 +28,8 @@ from .const import (
     OPT_ENABLE_EXAMS,
     OPT_ENABLE_GRADES,
     OPT_ENABLE_HOMEWORK,
+    OPT_ENABLE_LETTERS,
+    OPT_ENABLE_MESSAGES,
     OPT_ENABLE_SCHEDULE,
     OPT_REFRESH_COOLDOWN,
 )
@@ -180,6 +184,8 @@ def get_feature_config(config_entry: ConfigEntry) -> dict[str, bool]:
         "schedule": options.get(OPT_ENABLE_SCHEDULE, DEFAULT_ENABLE_SCHEDULE),
         "exams": options.get(OPT_ENABLE_EXAMS, DEFAULT_ENABLE_EXAMS),
         "grades": options.get(OPT_ENABLE_GRADES, DEFAULT_ENABLE_GRADES),
+        "letters": options.get(OPT_ENABLE_LETTERS, DEFAULT_ENABLE_LETTERS),
+        "messages": options.get(OPT_ENABLE_MESSAGES, DEFAULT_ENABLE_MESSAGES),
     }
 
 

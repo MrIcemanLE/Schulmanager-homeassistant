@@ -1,5 +1,56 @@
 # Schulmanager Integration – Changelog
 
+## 0.11.0 (2026-10-14)
+
+**Kurz gesagt:** Neue Sensoren zeigen ungelesene Elternbriefe und Messenger-Nachrichten an, ohne etwas als gelesen zu markieren. Geänderte Stunden sind im Wochenplan jetzt mit ⚠ markiert, und Home Assistant wird beim Abruf nicht mehr ausgebremst.
+
+### ✨ Neues
+
+- **Ungelesene Elternbriefe (PR #13, danke an @sbiela)**
+  - Neuer Sensor „Ungelesene Elternbriefe“ am Gerät „Schulmanager Online“: Anzahl ungelesener Briefe, dazu Titel, Versanddatum, Rückmeldefrist, betroffene Kinder, Textauszug und Anzahl der Anhänge
+  - Briefe werden dabei nicht geöffnet und bleiben in App und Portal ungelesen
+  - In den Optionen abschaltbar („Ungelesene Elternbriefe abrufen“)
+
+- **Ungelesene Messenger-Nachrichten (PR #13, danke an @sbiela)**
+  - Neuer Sensor „Ungelesene Nachrichten“ mit Anzahl und den betroffenen Unterhaltungen (Betreff, Absender, Empfänger, Anzahl, Zeitpunkt)
+  - Nachrichtentexte werden bewusst nicht geladen, damit keine Lesebestätigungen ausgelöst werden
+  - In den Optionen abschaltbar („Ungelesene Nachrichten abrufen“)
+
+- **Hinweise zu beiden Sensoren**
+  - Hat die Schule das Elternbrief- oder Messenger-Modul nicht freigeschaltet, wird der jeweilige Sensor gar nicht erst angelegt
+  - Briefinhalte, Namen und Unterhaltungen werden nicht in der Verlaufsdatenbank von Home Assistant gespeichert, nur die Anzahl
+  - Die Werte werden wie alle anderen Daten stündlich aktualisiert (oder sofort über den Button „Jetzt aktualisieren“)
+
+- **Diagnose-Sensor „Schule“ zeigt den echten Schulnamen**
+  - Bisher stand dort nur ein Platzhalter wie „School 12345“
+
+- **Neuer Diagnose-Sensor „Schul-ID“ pro Schüler:in**
+
+- **Eigenes Icon für die Integration**
+  - Neu gestaltetes Icon (Doktorhut über aufgeschlagenem Buch), das ab Home Assistant 2026.3 direkt in der Integrationsübersicht angezeigt wird
+
+### 🐛 Bugfixes
+
+- **Geänderte Stunden im Wochenplan nicht markiert (Issue #12)**
+  - Problem: Im Sensor „Wochenplan JSON“ (für die Stundenplan Card) waren nur Ausfälle (`✗`) und Vertretungen (`↔`) erkennbar – geänderter Unterricht, Raumwechsel und Sonderstunden sahen aus wie normale Stunden
+  - Lösung: Diese Stunden erscheinen jetzt als `Fach ⚠`
+
+- **Originaldaten fehlten im Sensor „Stundenplan Änderungen“ (Issue #12)**
+  - Problem: Ursprüngliches Fach, Lehrkraft und Raum wurden nur bei Ausfällen angezeigt, bei allen anderen Änderungen blieben sie leer
+  - Lösung: Die Originaldaten werden jetzt für alle Änderungsarten befüllt, genau wie im Sensor „Stundenplan heute“
+
+- **Geänderter Unterricht ohne Hervorhebung**
+  - Im Stundenplan-Kalender und im Text des Sensors „Stundenplan heute“ fehlte bei geändertem Unterricht das 🔁
+
+- **Home Assistant hing bei jeder Aktualisierung kurz**
+  - Problem: Die Anmeldung bei Schulmanager blockierte Home Assistant bei jedem Abruf für etwa eine halbe Sekunde
+  - Lösung: Die Anmeldung läuft jetzt im Hintergrund, ohne Home Assistant auszubremsen
+
+- **Kompatibilität mit kommenden Home-Assistant-Versionen**
+  - Eine Warnung im Log zu einer veralteten Geräteverknüpfung ist behoben (wäre ab Home Assistant 2027.8 ein Fehler geworden)
+
+---
+
 ## 0.10.2 (2026-09-20)
 
 ### 🐛 Bugfixes

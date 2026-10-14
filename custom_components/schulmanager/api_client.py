@@ -25,6 +25,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 from . import grading
+from .lesson_info import extract_original_info
 from .types import GradesPayload, ScheduleChange, SchedulePayload
 from .utils import common_headers, ensure_authenticated, sanitize_for_log
 
@@ -40,6 +41,10 @@ INDEX_URL = "https://login.schulmanager-online.de/"
 LEGACY_TERM_ID: Final = 28592
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class ModuleUnavailableError(RuntimeError):
+    """The school has not enabled a portal module (e.g. messenger) for this account."""
 
 
 class SchulmanagerClient:
@@ -67,6 +72,8 @@ class SchulmanagerClient:
         self._institution_id: int | None = institution_id
         self._user_id: int | None = user_id
         self._multiple_accounts: list[dict[str, Any]] | None = None
+        # Optional modules that answered 403; not requested again until reload
+        self._unavailable_modules: set[str] = set()
 
     async def _dump(self, name: str, data: Any) -> None:
         """Save debug data to file if debug dumps are enabled."""
@@ -238,7 +245,10 @@ class SchulmanagerClient:
         """Login to Schulmanager Online."""
         sess = async_get_clientsession(self.hass)
         salt = await self._fetch_salt(self.username)
-        hash_hex = self._pbkdf2_hash_hex(self.password, salt)
+        # ~0.5 s of CPU work (99999 PBKDF2 rounds); keep it off the event loop
+        hash_hex = await self.hass.async_add_executor_job(
+            self._pbkdf2_hash_hex, self.password, salt
+        )
 
         headers = common_headers() | {
             "Accept": "application/json, text/plain, */*",
@@ -428,7 +438,13 @@ class SchulmanagerClient:
         return dummy_version
 
     async def _api_call(
-        self, module: str, endpoint: str, parameters: dict, tag: str
+        self,
+        module: str | None,
+        endpoint: str,
+        parameters: dict,
+        tag: str,
+        *,
+        optional_module: bool = False,
     ) -> Any:
         """Make API call to Schulmanager."""
         await ensure_authenticated(self)
@@ -496,6 +512,8 @@ class SchulmanagerClient:
 
             # Check if the individual request failed (status 500, etc.)
             if isinstance(result, dict) and "status" in result:
+                if result["status"] == 403 and optional_module:
+                    raise ModuleUnavailableError(f"{module}/{endpoint}")
                 if result["status"] != 200:
                     _LOGGER.warning(
                         "API request failed: %s/%s -> status %s, id: %s",
@@ -511,6 +529,58 @@ class SchulmanagerClient:
                 if isinstance(result, dict) and "data" in result
                 else data
             )
+
+    async def fetch_institution_info(self) -> dict[str, Any] | None:
+        """Fetch the school's master data (real name, address, ...)."""
+        data = await self._api_call(None, "get-institution", {}, "institution_info")
+        return data if isinstance(data, dict) else None
+
+    async def fetch_unread_letters(self) -> list[dict[str, Any]]:
+        """Fetch unread parent letters (Elternbriefe) of the account.
+
+        Uses the same endpoint as the dashboard widget of the web app. Only the list of
+        unread letters is requested; no letter is opened, so nothing is marked as read.
+        """
+        data = await self._api_call(
+            "letters",
+            "get-unread-letters-for-widget",
+            {},
+            "letters_unread",
+            optional_module=True,
+        )
+        return (
+            [x for x in data if isinstance(x, dict)] if isinstance(data, list) else []
+        )
+
+    async def fetch_unread_messages(self) -> tuple[int, list[dict[str, Any]]]:
+        """Fetch the unread messenger count and conversations with unread messages.
+
+        Only metadata is requested (count and subscriptions/threads). Message bodies are
+        intentionally not fetched, because opening a thread may create read receipts.
+        """
+        count_raw = await self._api_call(
+            "messenger",
+            "count-new-messages",
+            {},
+            "messenger_count",
+            optional_module=True,
+        )
+        subs = await self._api_call(
+            "messenger",
+            "get-subscriptions",
+            {"all": False, "includeArchived": False},
+            "messenger_subscriptions",
+            optional_module=True,
+        )
+        unread = [
+            x
+            for x in (subs if isinstance(subs, list) else [])
+            if isinstance(x, dict) and (x.get("unreadCount") or 0) > 0
+        ]
+        if isinstance(count_raw, (int, float)):
+            return int(count_raw), unread
+        # Count endpoint unavailable: derive the total from the conversations
+        return sum(int(x["unreadCount"]) for x in unread), unread
 
     async def fetch_homework(self, student_id: str) -> list[dict]:
         """Fetch homework for a student."""
@@ -1043,16 +1113,11 @@ class SchulmanagerClient:
                 "note": lesson.get("comment", "")
             }
 
-            # For cancelled lessons, get original lesson info
-            if lesson_type == "cancelledLesson" and "originalLessons" in lesson:
-                original_lessons = lesson.get("originalLessons", [])
-                if original_lessons:
-                    original = original_lessons[0]  # Take first original lesson
-                    change_info["original_subject"] = (original.get("subject") or {}).get("abbreviation", "")
-                    original_teachers = original.get("teachers", [])
-                    if original_teachers:
-                        change_info["original_teacher"] = original_teachers[0].get("abbreviation", "")
-                    change_info["original_room"] = (original.get("room") or {}).get("name", "")
+            # Same lookup as the schedule sensors, for every change type
+            original = extract_original_info(lesson)
+            change_info["original_subject"] = original["subject"]
+            change_info["original_teacher"] = original["teacher"]
+            change_info["original_room"] = original["room"]
 
             # For special/substitute lessons, get new lesson info
             if actual_lesson:
@@ -1768,6 +1833,8 @@ class SchulmanagerClient:
                 "schedule": True,
                 "exams": True,
                 "grades": True,
+                "letters": True,
+                "messages": True,
             }
 
         result: dict[str, Any] = {
@@ -1855,6 +1922,35 @@ class SchulmanagerClient:
             else:
                 result["grades"][sid] = {"subjects": {}}
 
+        # Account-level data (not per student)
+        # Keys stay absent on failure so the sensors become unavailable
+        if (
+            enabled_features.get("letters", True)
+            and "letters" not in self._unavailable_modules
+        ):
+            try:
+                result["letters_unread"] = await self.fetch_unread_letters()
+            except ModuleUnavailableError:
+                _LOGGER.info("Schulmanager: letters module not enabled, skipping")
+                self._unavailable_modules.add("letters")
+            except Exception as err:
+                _LOGGER.warning("Schulmanager: letters fetch failed: %s", err)
+
+        if (
+            enabled_features.get("messages", True)
+            and "messenger" not in self._unavailable_modules
+        ):
+            try:
+                count, unread = await self.fetch_unread_messages()
+            except ModuleUnavailableError:
+                _LOGGER.info("Schulmanager: messenger module not enabled, skipping")
+                self._unavailable_modules.add("messenger")
+            except Exception as err:
+                _LOGGER.warning("Schulmanager: messenger fetch failed: %s", err)
+            else:
+                result["messages_unread_count"] = count
+                result["messages_unread"] = unread
+
         # Save for other platforms
         self.data = result
         # Optional dump
@@ -1918,8 +2014,19 @@ class SchulmanagerHubClient:
                 # Single-school account
                 inst_key: Any = probe.get_institution_id() or institution_id or 0
                 self._clients[inst_key] = probe
-                self._school_names[inst_key] = ""
-                self._all_students = list(probe.get_students())
+                try:
+                    info = await probe.fetch_institution_info()
+                except Exception as err:
+                    _LOGGER.debug("Fetching institution info failed: %s", err)
+                    info = None
+                school_name = (info or {}).get("name") or ""
+                self._school_names[inst_key] = school_name
+                self._all_students = []
+                for student in probe.get_students():
+                    student_with_school = student.copy()
+                    student_with_school["school_id"] = inst_key
+                    student_with_school["school_name"] = school_name
+                    self._all_students.append(student_with_school)
                 _LOGGER.debug(
                     "Single-school account: %d students found",
                     len(self._all_students),
@@ -1985,7 +2092,7 @@ class SchulmanagerHubClient:
 
         async def login_to_school(school: dict[str, Any]) -> tuple[Any, str, SchulmanagerClient]:
             """Login to a single school and return (key, name, client)."""
-            school_name = school.get("label") or "Schule"
+            login_label = school.get("label") or "Schule"
             candidates = _build_login_candidates(school)
             if not candidates:
                 raise RuntimeError("No login candidates for school")
@@ -1996,7 +2103,7 @@ class SchulmanagerHubClient:
                 user_id = params["user_id"]
                 _LOGGER.debug(
                     "Logging into school: %s (institution_id=%s, user_id=%s)",
-                    school_name,
+                    login_label,
                     inst_id,
                     user_id,
                 )
@@ -2016,11 +2123,17 @@ class SchulmanagerHubClient:
 
                 if client.has_token():
                     school_key: Any = inst_id if inst_id is not None else (user_id or 0)
+                    try:
+                        info = await client.fetch_institution_info()
+                    except Exception as info_err:
+                        _LOGGER.debug("Fetching institution info failed: %s", info_err)
+                        info = None
+                    school_name = (info or {}).get("name") or login_label
                     return school_key, school_name, client
 
                 last_err = RuntimeError("Login returned no token")
 
-            raise RuntimeError(f"Login failed for {school_name}: {last_err!r}")
+            raise RuntimeError(f"Login failed for {login_label}: {last_err!r}")
 
         # Login to all schools in parallel
         login_tasks = [login_to_school(school) for school in schools]
@@ -2153,7 +2266,7 @@ class SchulmanagerHubClient:
 
         # Aggregate results from all schools
         for client_result in client_results:
-            if isinstance(client_result, Exception):
+            if isinstance(client_result, BaseException):
                 _LOGGER.error("Failed to update school data: %s", client_result)
                 continue
 
@@ -2161,6 +2274,19 @@ class SchulmanagerHubClient:
             for key in ["homework", "schedule", "exams", "grades"]:
                 if key in client_result:
                     result[key].update(client_result[key])
+
+            # Merge account-level data (letters/messages) across schools
+            if "letters_unread" in client_result:
+                result.setdefault("letters_unread", []).extend(
+                    client_result.get("letters_unread") or []
+                )
+            if "messages_unread" in client_result:
+                result.setdefault("messages_unread", []).extend(
+                    client_result.get("messages_unread") or []
+                )
+                result["messages_unread_count"] = result.get(
+                    "messages_unread_count", 0
+                ) + client_result.get("messages_unread_count", 0)
 
         return result
 

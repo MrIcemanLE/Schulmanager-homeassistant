@@ -8,14 +8,15 @@ use stable, ID-based unique IDs.
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
-from html import escape
+from html import escape, unescape
 import logging
+import re
 from typing import Any, cast
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
@@ -24,12 +25,18 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from . import grading
-from .const import DOMAIN, OPT_SCHEDULE_HIGHLIGHT
+from .const import DOMAIN, OPT_SCHEDULE_HIGHLIGHT, VERSION
 from .coordinator import SchulmanagerCoordinator
+from .lesson_info import extract_original_info, extract_primary_info
 from .types import IntegrationData
 from .util import normalize_student_slug
 
 _LOGGER = logging.getLogger(__name__)
+
+# Changes other than cancellation/substitution, marked with ⚠ in the weekly plan
+CHANGED_LESSON_TYPES = frozenset(
+    {"changedLesson", "roomChange", "specialLesson", "irregularLesson"}
+)
 
 LESSON_TYPE_LABELS: dict[str, str] = {
     "regularLesson": "Regulär",
@@ -39,6 +46,7 @@ LESSON_TYPE_LABELS: dict[str, str] = {
     "teacherChange": "Lehrkraftwechsel",
     "roomChange": "Raumwechsel",
     "irregularLesson": "Unregelmäßig",
+    "changedLesson": "Geändert",
     "event": "Veranstaltung",
     "exam": "Prüfung",
 }
@@ -111,14 +119,20 @@ async def async_setup_entry(
         # Add days until next exam sensor
         entities.append(NextExamCountdownSensor(client, coord, sid, name, slug))
 
-        # Add school diagnostic sensor (shows which school the student belongs to)
-        # Only relevant for multi-school accounts, but added for all students
+        # Add school diagnostic sensors (which school the student belongs to)
         school_name = st.get("school_name")  # May be None for single-school accounts
         school_id = st.get("school_id")  # May be None for single-school accounts
         entities.append(SchoolDiagnosticSensor(coord, sid, name, slug, school_name, school_id))
+        entities.append(SchoolIdDiagnosticSensor(coord, sid, name, slug, school_id))
 
         # Add Wochenplan JSON sensor (for Stundenplan Card integration)
         entities.append(WochenplanJsonSensor(client, coord, sid, name, slug))
+
+    # Account-level data is only present if enabled and the school offers the module
+    if data is not None and "letters_unread" in data:
+        entities.append(UnreadLettersSensor(coord))
+    if data is not None and "messages_unread" in data:
+        entities.append(UnreadMessagesSensor(coord))
 
     async_add_entities(entities)
 
@@ -257,101 +271,6 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
                 "lesson_count": len(raw_data["lessons"]),
             }
 
-        def _teacher_names(source: dict[str, Any]) -> str:
-            names: list[str] = []
-            teachers = source.get("teachers")
-            if isinstance(teachers, list):
-                for teacher in teachers:
-                    if not isinstance(teacher, dict):
-                        continue
-                    abbr = teacher.get("abbreviation")
-                    if abbr:
-                        names.append(str(abbr))
-                        continue
-                    firstname = teacher.get("firstname")
-                    lastname = teacher.get("lastname")
-                    if firstname and lastname:
-                        names.append(f"{firstname} {lastname}")
-                    elif lastname:
-                        names.append(str(lastname))
-            return ", ".join(names)
-
-        def _extract_core_info(source: dict[str, Any] | None) -> dict[str, str]:
-            if not isinstance(source, dict):
-                return {"subject": "", "subject_full": "", "room": "", "teacher": ""}
-            subject = ""
-            subject_full = ""
-            subject_data = source.get("subject")
-            if isinstance(subject_data, dict):
-                subject = (
-                    subject_data.get("abbreviation")
-                    or subject_data.get("shortName")
-                    or ""
-                )
-                subject_full = (
-                    subject_data.get("name") or subject_data.get("longName") or subject
-                )
-            elif isinstance(subject_data, str):
-                subject = subject_full = subject_data
-            else:
-                subject = (
-                    source.get("subjectShort")
-                    or source.get("subject_name")
-                    or source.get("subject")
-                    or ""
-                )
-                subject_full = (
-                    source.get("subjectLong") or source.get("subjectFull") or subject
-                )
-            room_data = source.get("room")
-            if isinstance(room_data, dict):
-                room = (
-                    room_data.get("name")
-                    or room_data.get("shortName")
-                    or room_data.get("abbreviation")
-                    or ""
-                )
-            elif isinstance(room_data, str):
-                room = room_data
-            else:
-                room = ""
-            teacher = _teacher_names(source)
-            return {
-                "subject": subject,
-                "subject_full": subject_full,
-                "room": room,
-                "teacher": teacher,
-            }
-
-        def _extract_primary_info(lesson: dict[str, Any]) -> dict[str, str]:
-            candidates = [
-                lesson.get("actualLesson"),
-                lesson.get("lesson"),
-                lesson,
-            ]
-            for candidate in candidates:
-                info = _extract_core_info(candidate)
-                if any(info.values()):
-                    return info
-            return {"subject": "", "subject_full": "", "room": "", "teacher": ""}
-
-        def _extract_original_info(lesson: dict[str, Any]) -> dict[str, str]:
-            candidates: list[dict[str, Any] | None] = []
-            original = lesson.get("originalLesson")
-            if isinstance(original, dict):
-                candidates.append(original)
-            original_list = lesson.get("originalLessons")
-            if isinstance(original_list, list):
-                for entry in original_list:
-                    if isinstance(entry, dict):
-                        candidates.append(entry)
-            candidates.append(lesson.get("lesson"))
-            for candidate in candidates:
-                info = _extract_core_info(candidate)
-                if any(info.values()):
-                    return info
-            return {"subject": "", "subject_full": "", "room": "", "teacher": ""}
-
         def _build_info_text(lesson: dict[str, Any], teacher_text: str) -> str:
             info_parts: list[str] = []
             if teacher_text:
@@ -437,8 +356,8 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
 
         for lesson in items_sorted:
             lesson_type = lesson.get("type", "regularLesson")
-            primary_info = _extract_primary_info(lesson)
-            original_info = _extract_original_info(lesson)
+            primary_info = extract_primary_info(lesson)
+            original_info = extract_original_info(lesson)
             hour_value, _ = _hour_display(lesson)
             lesson_entry = {
                 "hour": hour_value,
@@ -501,7 +420,7 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
                 cancel_label = block.get("cancel_type_label", "Ausfall")
                 teacher_text = ""
                 if isinstance(cancel_lesson, dict):
-                    teacher_text = _extract_original_info(cancel_lesson).get(
+                    teacher_text = extract_original_info(cancel_lesson).get(
                         "teacher", ""
                     )
                 info_text = (
@@ -632,7 +551,13 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
             if highlight:
                 if lesson_type == "cancelledLesson":
                     emoji = "❌ "
-                elif lesson_type in {"substitution", "specialLesson", "teacherChange", "irregularLesson"}:
+                elif lesson_type in {
+                    "substitution",
+                    "specialLesson",
+                    "teacherChange",
+                    "irregularLesson",
+                    "changedLesson",
+                }:
                     emoji = "🔁 "
                 elif lesson_type == "roomChange":
                     emoji = "🚪 "
@@ -1412,6 +1337,54 @@ class SchoolDiagnosticSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorE
         return attrs
 
 
+class SchoolIdDiagnosticSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
+    """Diagnostic sensor showing the Schulmanager institution ID a student belongs to."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:identifier"
+    _attr_translation_key = "school_id"
+
+    def __init__(
+        self,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        student_slug: str,
+        school_id: int | None,
+    ) -> None:
+        """Initialize the school ID diagnostic sensor."""
+        super().__init__(coordinator)
+        self.student_id = student_id
+        self.student_name = student_name
+        self._school_id = school_id
+
+        entry_id = self.coordinator.config_entry.entry_id
+        self._attr_unique_id = f"schulmanager_{entry_id}_{self.student_id}_school_id"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"student_{self.student_id}")},
+            name=self.student_name,
+            manufacturer="Schulmanager Online",
+            model="Schüler",
+            suggested_area="Schule",
+            configuration_url="https://login.schulmanager-online.de/",
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return bool(self.coordinator.last_update_success)
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the school ID."""
+        return self._school_id
+
+
 class CurrentLessonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     """Sensor showing what is happening right now for a student.
 
@@ -1817,6 +1790,9 @@ class WochenplanJsonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnt
         if lesson_type in ("substitution", "teacherChange"):
             return f"{subject_abbr} ↔" if subject_abbr else "↔"
 
+        if lesson_type in CHANGED_LESSON_TYPES:
+            return f"{subject_abbr or LESSON_TYPE_LABELS.get(lesson_type, lesson_type)} ⚠"
+
         if not subject_abbr and lesson_type not in ("regularLesson", ""):
             # e.g. type "event" typically has no actualLesson.subject - fall
             # back to the known German type label instead of an empty cell.
@@ -1845,3 +1821,160 @@ class WochenplanJsonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnt
         # Keep order, drop empties and exact duplicates.
         unique_labels = list(dict.fromkeys(label for label in labels if label))
         return " → ".join(unique_labels)
+
+
+def _service_device_info(coordinator: SchulmanagerCoordinator) -> DeviceInfo:
+    """Device of the Schulmanager account (shared with the refresh button)."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"service_{coordinator.config_entry.entry_id}")},
+        name="Schulmanager Online",
+        manufacturer="Schulmanager Online",
+        model="Portal-Zugang",
+        sw_version=VERSION,
+        entry_type=DeviceEntryType.SERVICE,
+        suggested_area="Schule",
+        configuration_url="https://login.schulmanager-online.de/",
+    )
+
+
+def _plain_text(value: Any, limit: int = 800) -> str:
+    """Convert letter HTML to compact plain text."""
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    text = re.sub(r"\s+", " ", unescape(text)).strip()
+    return text[:limit]
+
+
+class UnreadLettersSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
+    """Number of unread parent letters (Elternbriefe) with details as attributes.
+
+    Data comes from the dashboard widget endpoint of the web app; letters are never
+    opened, so reading them in the app is still required to mark them as read.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "letters_unread"
+    _attr_icon = "mdi:email-alert-outline"
+    # Letter texts and children's names must not end up in the recorder database
+    _unrecorded_attributes = frozenset({"letters"})
+
+    def __init__(self, coordinator: SchulmanagerCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"schulmanager_{coordinator.config_entry.entry_id}_letters_unread"
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return _service_device_info(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        data = self.coordinator.data
+        return bool(self.coordinator.last_update_success) and bool(
+            data and "letters_unread" in data
+        )
+
+    def _letters(self) -> list[dict[str, Any]]:
+        data = cast(IntegrationData | None, self.coordinator.data)
+        letters = data.get("letters_unread", []) if data else []
+        return [x for x in letters if isinstance(x, dict)]
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the number of unread letters."""
+        return len(self._letters())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return the unread letters."""
+        letters = []
+        for letter in self._letters():
+            students = []
+            for status in letter.get("studentStatuses") or []:
+                student = status.get("student") if isinstance(status, dict) else None
+                if isinstance(student, dict):
+                    name = " ".join(
+                        x
+                        for x in (student.get("firstname"), student.get("lastname"))
+                        if x
+                    )
+                    if name:
+                        students.append(name)
+            letters.append(
+                {
+                    "id": letter.get("id"),
+                    "title": letter.get("title"),
+                    "sent": letter.get("sentDate"),
+                    "deadline": letter.get("answerDeadline"),
+                    "students": students,
+                    "text": _plain_text(letter.get("text")),
+                    "attachments": len(letter.get("attachments") or []),
+                }
+            )
+        return {"letters": letters}
+
+
+class UnreadMessagesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
+    """Number of unread messenger messages with the affected conversations.
+
+    Only conversation metadata is fetched (subject, sender, unread count). Message
+    bodies are not requested to avoid triggering read receipts.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "messages_unread"
+    _attr_icon = "mdi:message-badge-outline"
+    _unrecorded_attributes = frozenset({"threads"})
+
+    def __init__(self, coordinator: SchulmanagerCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"schulmanager_{coordinator.config_entry.entry_id}_messages_unread"
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return _service_device_info(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        data = self.coordinator.data
+        return bool(self.coordinator.last_update_success) and bool(
+            data and "messages_unread" in data
+        )
+
+    def _data(self) -> IntegrationData | dict[str, Any]:
+        return cast(IntegrationData | None, self.coordinator.data) or {}
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the number of unread messages."""
+        return self._data().get("messages_unread_count", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return conversations with unread messages, newest first."""
+        threads = []
+        for sub in self._data().get("messages_unread") or []:
+            thread: dict[str, Any] = (
+                sub["thread"] if isinstance(sub.get("thread"), dict) else {}
+            )
+            threads.append(
+                {
+                    "id": sub.get("id"),
+                    "subject": thread.get("subject"),
+                    "sender": thread.get("senderString"),
+                    "recipients": thread.get("recipientString"),
+                    "unread": sub.get("unreadCount"),
+                    "last": thread.get("lastMessageTimestamp"),
+                    "private": thread.get("isPrivateChat"),
+                }
+            )
+        threads.sort(key=lambda t: str(t.get("last") or ""), reverse=True)
+        return {"threads": threads}

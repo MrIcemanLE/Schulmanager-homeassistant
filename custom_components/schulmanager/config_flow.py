@@ -27,6 +27,8 @@ from .const import (
     OPT_ENABLE_EXAMS,
     OPT_ENABLE_GRADES,
     OPT_ENABLE_HOMEWORK,
+    OPT_ENABLE_LETTERS,
+    OPT_ENABLE_MESSAGES,
     OPT_ENABLE_SCHEDULE,
     OPT_RANGE_FUTURE_DAYS,
     OPT_RANGE_PAST_DAYS,
@@ -263,6 +265,18 @@ class SchulmanagerOptionsFlowHandler(OptionsFlow):
                     OPT_ENABLE_GRADES,
                     default=opts.get(
                         OPT_ENABLE_GRADES, DEFAULT_OPTIONS[OPT_ENABLE_GRADES]
+                    ),
+                ): cv.boolean,
+                vol.Required(
+                    OPT_ENABLE_LETTERS,
+                    default=opts.get(
+                        OPT_ENABLE_LETTERS, DEFAULT_OPTIONS[OPT_ENABLE_LETTERS]
+                    ),
+                ): cv.boolean,
+                vol.Required(
+                    OPT_ENABLE_MESSAGES,
+                    default=opts.get(
+                        OPT_ENABLE_MESSAGES, DEFAULT_OPTIONS[OPT_ENABLE_MESSAGES]
                     ),
                 ): cv.boolean,
                 vol.Required(
