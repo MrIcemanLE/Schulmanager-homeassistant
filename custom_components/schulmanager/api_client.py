@@ -55,6 +55,14 @@ class ModuleUnavailableError(RuntimeError):
     """The school has not enabled a portal module (e.g. messenger) for this account."""
 
 
+class SchulmanagerAuthError(RuntimeError):
+    """Schulmanager rejected the credentials (HTTP 401)."""
+
+
+class SchulmanagerTwoFactorRequiredError(RuntimeError):
+    """The account has two-factor authentication enabled, which is not supported."""
+
+
 class SchulmanagerClient:
     """Service client for communicating with Schulmanager Online."""
 
@@ -291,6 +299,8 @@ class SchulmanagerClient:
                 await self._dump(
                     "login_response.json", {"status": resp.status, "raw": text[:500]}
                 )
+                if resp.status == 401:
+                    raise SchulmanagerAuthError(f"login_failed:{resp.status}")
                 raise RuntimeError(f"login_failed:{resp.status}")
 
             # Before the first dump/log line that can contain these identifiers
@@ -305,6 +315,8 @@ class SchulmanagerClient:
                 {"status": resp.status, "data": sanitize_for_log(data)},
             )
 
+            if resp.status == 401:
+                raise SchulmanagerAuthError(f"login_failed:{resp.status}")
             if resp.status != 200:
                 raise RuntimeError(f"login_failed:{resp.status}")
 
@@ -317,6 +329,13 @@ class SchulmanagerClient:
                 )
                 # Store but don't fail - caller must handle school selection
                 return
+
+            # 2FA is set per school account; the server answers 200 without a jwt
+            if data.get("requireTwoFactorEmailCode") or data.get("requireTOTP"):
+                method = "email" if data.get("requireTwoFactorEmailCode") else "totp"
+                raise SchulmanagerTwoFactorRequiredError(
+                    f"two_factor_required:{method}"
+                )
 
             # Normal single-school login
             if "jwt" not in data:
@@ -2004,6 +2023,7 @@ class SchulmanagerHubClient:
         self._school_names: dict[Any, str] = {}  # key -> school name
         self._all_students: list[dict[str, Any]] = []
         self._detected_schools: list[dict[str, Any]] | None = None
+        self._failed_schools: list[dict[str, Any]] = []
 
     async def async_login(
         self,
@@ -2070,46 +2090,35 @@ class SchulmanagerHubClient:
         """Login to a list of schools in parallel and collect students."""
         _LOGGER.info("Logging into %d schools in parallel", len(schools))
 
+        def _as_int(value: Any) -> int | None:
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+            return value if isinstance(value, int) else None
+
         def _build_login_candidates(school: dict[str, Any]) -> list[dict[str, int | None]]:
-            """Build possible login parameter combinations from a school record."""
-            inst_ids: list[int] = []
-            user_ids: list[int] = []
+            """Build the login parameters for a stored school record.
 
-            def _add_unique(target: list[int], value: Any) -> None:
-                if isinstance(value, str) and value.isdigit():
-                    value = int(value)
-                if isinstance(value, int) and value not in target:
-                    target.append(value)
+            A multipleAccounts record's "id" is the user id of that school's account;
+            the web app logs in with exactly that. The v2->v3 migration instead
+            stored single-school entries as {"id": <institutionId>, "label": "School <id>"}.
+            """
+            inst_id = _as_int(
+                school.get("institutionId") or school.get("institution_id")
+            )
+            user_id = _as_int(school.get("userId") or school.get("user_id"))
+            raw_id = _as_int(school.get("id"))
+            if raw_id is not None and inst_id is None and user_id is None:
+                if school.get("label") == f"School {raw_id}":
+                    inst_id = raw_id
+                else:
+                    user_id = raw_id
 
-            _add_unique(inst_ids, school.get("institutionId"))
-            _add_unique(inst_ids, school.get("institution_id"))
-            _add_unique(user_ids, school.get("userId"))
-            _add_unique(user_ids, school.get("user_id"))
-
-            raw_id = school.get("id")
-            _add_unique(user_ids, raw_id)
-            if not inst_ids:
-                _add_unique(inst_ids, raw_id)
-
-            combos: list[dict[str, int | None]] = []
-            for inst in inst_ids:
-                combos.append({"institution_id": inst, "user_id": None})
-            for user in user_ids:
-                combos.append({"institution_id": None, "user_id": user})
-            for inst in inst_ids:
-                for user in user_ids:
-                    combos.append({"institution_id": inst, "user_id": user})
-
-            # Deduplicate
-            seen: set[tuple[int | None, int | None]] = set()
-            unique: list[dict[str, int | None]] = []
-            for c in combos:
-                key = (c["institution_id"], c["user_id"])
-                if key in seen:
-                    continue
-                seen.add(key)
-                unique.append(c)
-            return unique
+            candidates: list[dict[str, int | None]] = []
+            if user_id is not None:
+                candidates.append({"institution_id": None, "user_id": user_id})
+            if inst_id is not None:
+                candidates.append({"institution_id": inst_id, "user_id": None})
+            return candidates
 
         async def login_to_school(school: dict[str, Any]) -> tuple[Any, str, SchulmanagerClient]:
             """Login to a single school and return (key, name, client)."""
@@ -2140,6 +2149,7 @@ class SchulmanagerHubClient:
                 try:
                     await client.async_login()
                 except Exception as err:
+                    _LOGGER.debug("Login attempt for %s failed: %r", login_label, err)
                     last_err = err
                     continue
 
@@ -2155,6 +2165,10 @@ class SchulmanagerHubClient:
 
                 last_err = RuntimeError("Login returned no token")
 
+            if isinstance(
+                last_err, SchulmanagerAuthError | SchulmanagerTwoFactorRequiredError
+            ):
+                raise last_err
             raise RuntimeError(f"Login failed for {login_label}: {last_err!r}")
 
         # Login to all schools in parallel
@@ -2166,7 +2180,29 @@ class SchulmanagerHubClient:
 
         for school, result in zip(schools, results, strict=True):
             if isinstance(result, Exception):
-                _LOGGER.error("Failed to login to school: %s", result)
+                # Each school has its own Schulmanager account with its own password and 2FA
+                if isinstance(result, SchulmanagerTwoFactorRequiredError):
+                    reason = "two_factor"
+                    _LOGGER.warning(
+                        "The Schulmanager account at school '%s' has two-factor "
+                        "authentication enabled, which is not supported; "
+                        "its students are skipped",
+                        school.get("label"),
+                    )
+                elif isinstance(result, SchulmanagerAuthError):
+                    reason = "password"
+                    _LOGGER.warning(
+                        "Schulmanager rejected the password for school '%s'; "
+                        "its students are skipped. The account at this school "
+                        "may use a different password",
+                        school.get("label"),
+                    )
+                else:
+                    reason = "error"
+                    _LOGGER.error("Failed to login to school: %s", result)
+                self._failed_schools.append(
+                    {"label": school.get("label") or "", "reason": reason}
+                )
                 summary.append(
                     {
                         "school_id": school.get("id"),
@@ -2218,6 +2254,13 @@ class SchulmanagerHubClient:
     def get_all_students(self) -> list[dict[str, Any]]:
         """Return all students with school context (school_name=None for single-school)."""
         return list(self._all_students)
+
+    def get_failed_schools(self) -> list[dict[str, Any]]:
+        """Return the schools whose login failed: {"label", "reason"}.
+
+        reason is "password", "two_factor" or "error".
+        """
+        return list(self._failed_schools)
 
     def get_detected_schools(self) -> list[dict[str, Any]] | None:
         """Return the schools list detected during probe login (for config storage).

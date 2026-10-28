@@ -14,7 +14,11 @@ from homeassistant.config_entries import (
 )
 from homeassistant.helpers import config_validation as cv
 
-from .api_client import SchulmanagerHubClient
+from .api_client import (
+    SchulmanagerAuthError,
+    SchulmanagerHubClient,
+    SchulmanagerTwoFactorRequiredError,
+)
 from .const import (
     CONF_PASSWORD,
     CONF_USERNAME,
@@ -108,6 +112,10 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
                         options=DEFAULT_OPTIONS.copy(),
                     )
 
+        except SchulmanagerTwoFactorRequiredError:
+            errors["base"] = "two_factor_required"
+        except SchulmanagerAuthError:
+            errors["base"] = "invalid_auth"
         except Exception:
             _LOGGER.exception("Failed to connect to Schulmanager")
             errors["base"] = "cannot_connect"

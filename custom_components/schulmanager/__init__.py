@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import (
     DeviceEntryType,
     async_get as async_get_device_registry,
@@ -318,6 +319,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     client = SchulmanagerHubClient(hass, username, password)
     await client.async_login(schools=schools, institution_id=institution_id)
+    _async_update_rejected_schools_issue(hass, entry, client)
 
     coordinator = SchulmanagerCoordinator(hass, client, entry)
 
@@ -395,6 +397,39 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+# Failed-school reasons that the user can fix in their Schulmanager account
+_SCHOOL_LOGIN_ISSUES = {
+    "password": "school_login_rejected",
+    "two_factor": "school_two_factor_required",
+}
+
+
+def _school_login_issue_id(entry: ConfigEntry, translation_key: str) -> str:
+    return f"{translation_key}_{entry.entry_id}"
+
+
+def _async_update_rejected_schools_issue(
+    hass: HomeAssistant, entry: ConfigEntry, client: SchulmanagerHubClient
+) -> None:
+    """Raise a repair issue per reason while some schools cannot be logged into."""
+    failed = client.get_failed_schools()
+    for reason, translation_key in _SCHOOL_LOGIN_ISSUES.items():
+        issue_id = _school_login_issue_id(entry, translation_key)
+        schools = [school["label"] for school in failed if school["reason"] == reason]
+        if not schools:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+            continue
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=translation_key,
+            translation_placeholders={"schools": ", ".join(schools)},
+        )
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(
@@ -403,6 +438,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         entry.runtime_data = None
+        for translation_key in _SCHOOL_LOGIN_ISSUES.values():
+            ir.async_delete_issue(
+                hass, DOMAIN, _school_login_issue_id(entry, translation_key)
+            )
 
     # Unregister services if this was the last entry
     if not hass.data[DOMAIN]:

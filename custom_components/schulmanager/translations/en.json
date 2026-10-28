@@ -77,7 +77,8 @@
       "invalid_auth": "Invalid authentication",
       "cannot_connect": "Unable to connect",
       "no_students": "No students found in your account",
-      "unknown": "Unknown error"
+      "unknown": "Unknown error",
+      "two_factor_required": "This Schulmanager account has two-factor authentication enabled, which the integration does not support. Turn it off in the Schulmanager settings and try again."
     },
     "abort": {
       "already_configured": "Device is already configured",
@@ -112,6 +113,16 @@
           "enable_messages": "Number of unread messages and affected conversations. Message texts are not loaded, so no read receipts are sent."
         }
       }
+    }
+  },
+  "issues": {
+    "school_login_rejected": {
+      "title": "Schulmanager rejected the password for some schools",
+      "description": "Schulmanager rejected the configured password for: {schools}. Students of these schools are missing.\n\nIn Schulmanager, every school has its own account, even when they share the same e-mail address, and each account has its own password. Log in at https://login.schulmanager-online.de and select the school: if the password is refused there as well, set the same password for all your school accounts and reload the integration."
+    },
+    "school_two_factor_required": {
+      "title": "Two-factor authentication blocks some schools",
+      "description": "The Schulmanager account for these schools has two-factor authentication enabled: {schools}. The integration cannot log in with a code, so students of these schools are missing.\n\nIn Schulmanager, every school has its own account, and two-factor authentication is switched on per account. To include these students, turn off two-factor authentication for the account at this school in the Schulmanager settings and reload the integration."
     }
   }
 }

@@ -1,5 +1,20 @@
 # Schulmanager Integration – Changelog
 
+## 0.12.1 (2026-10-28)
+
+**Kurz gesagt:** Bei Kindern an mehreren Schulen fehlt kein Kind mehr stillschweigend. Kann sich die Integration bei einer Schule nicht anmelden, zeigt Home Assistant unter Einstellungen → Reparaturen einen Hinweis mit der Schule und dem Grund an, etwa eine aktive Zwei-Faktor-Anmeldung.
+
+### 🐛 Bugfixes
+
+- **Kinder an mehreren Schulen (Danke an @apfelbasti, Issue #16)**
+  - Bei Schulmanager hat jede Schule ein eigenes Konto, auch bei gleicher E-Mail-Adresse. Passwort und Zwei-Faktor-Anmeldung gelten pro Konto.
+  - Ist für das Konto einer Schule die Zwei-Faktor-Anmeldung aktiv, erscheint jetzt ein Reparaturhinweis. Die Integration unterstützt die Zwei-Faktor-Anmeldung noch nicht. Schalte sie für das Konto dieser Schule aus, damit die Kinder erscheinen.
+  - Lehnt eine Schule das Passwort ab, erscheint ebenfalls ein Reparaturhinweis.
+  - Die Anmeldung bei mehreren Schulen läuft jetzt genau wie in der Schulmanager-Weboberfläche. Die Integration macht keine überflüssigen Fehlversuche mehr.
+- **Klarere Fehler bei der Einrichtung:** Ein falsches Passwort meldet jetzt „Anmeldung fehlgeschlagen“ statt „Verbindung fehlgeschlagen“. Für Konten mit aktiver Zwei-Faktor-Anmeldung gibt es eine eigene Meldung.
+
+---
+
 ## 0.12.0 (2026-10-14)
 
 **Kurz gesagt:** Der Wochenplan für die Stundenplan Card zeigt jetzt Fach, Lehrkraft und Raum untereinander und markiert Änderungen genau dort, wo sie passieren – mit dem bisherigen Wert in Klammern. Die Markierungen sind dieselben Emojis wie im Kalender.

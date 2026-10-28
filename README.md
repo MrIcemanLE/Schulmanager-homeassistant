@@ -37,6 +37,7 @@ Voraussetzung: Home Assistant 2024.6 oder neuer.
 
 2. **Multi-School Accounts**
    - Bei Kindern an mehreren Schulen werden automatisch alle Kinder eingebunden
+   - Jede Schule hat bei Schulmanager ein eigenes Konto. Damit alle Kinder erscheinen, brauchen alle Schulkonten dasselbe Passwort, und die Zwei-Faktor-Anmeldung muss ausgeschaltet sein. Klappt eine Schule nicht, zeigt Home Assistant unter Einstellungen → Reparaturen einen Hinweis an
    - Jeder Schüler erhält einen "Schule"-Sensor zur Identifikation
 
 3. **Konfiguration anpassen**
