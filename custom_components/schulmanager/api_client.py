@@ -845,8 +845,6 @@ class SchulmanagerClient:
             _LOGGER.debug("Total %d exams (regular + calendar) for student %s", len(all_exams), student_id)
             return all_exams
 
-
-
     async def fetch_schedule_today_tomorrow(
         self, student_id: str, class_id: int | None = None, weeks: int = 2
     ) -> SchedulePayload:
@@ -1043,6 +1041,13 @@ class SchulmanagerClient:
                             if change:
                                 changes_tomorrow.append(change)
 
+        def _hour_key(change: ScheduleChange) -> int:
+            hour = str(change.get("hour", "")).strip()
+            return int(hour) if hour.isdigit() else 999
+
+        changes_today.sort(key=_hour_key)
+        changes_tomorrow.sort(key=_hour_key)
+
         return {
             "today": tlist,
             "tomorrow": nlist,
@@ -1054,7 +1059,6 @@ class SchulmanagerClient:
             },
             "class_hours": list(class_hours_map.values()),
         }
-
 
     def _parse_schedule_data(self, data: Any, reference_date: date) -> SchedulePayload:
         """Parse verschiedene Datenformate für Stundenpläne."""
