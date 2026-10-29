@@ -39,6 +39,8 @@ from .utils import common_headers, ensure_authenticated, sanitize_for_log
 
 LOGIN_URL = "https://login.schulmanager-online.de/api/login"
 GET_SALT_URL = "https://login.schulmanager-online.de/api/get-salt"
+DEVICE_LOGIN_URL = "https://login.schulmanager-online.de/api/login-with-user-device"
+DELETE_DEVICE_URL = "https://login.schulmanager-online.de/api/delete-user-device"
 CALLS_URL = "https://login.schulmanager-online.de/api/calls"
 INDEX_URL = "https://login.schulmanager-online.de/"
 
@@ -60,7 +62,7 @@ class SchulmanagerAuthError(RuntimeError):
 
 
 class SchulmanagerTwoFactorRequiredError(RuntimeError):
-    """The account has two-factor authentication enabled, which is not supported."""
+    """The account needs a two-factor code (also raised for a wrong code)."""
 
 
 class SchulmanagerClient:
@@ -73,6 +75,8 @@ class SchulmanagerClient:
         password: str,
         institution_id: int | None = None,
         user_id: int | None = None,
+        user_device: dict[str, Any] | None = None,
+        two_factor_code: str | None = None,
     ) -> None:
         """Initialize the service client with credentials and HA context."""
         self.hass = hass
@@ -86,6 +90,10 @@ class SchulmanagerClient:
         self._institution_id: int | None = institution_id
         self._user_id: int | None = user_id
         self._multiple_accounts: list[dict[str, Any]] | None = None
+        # Remembered device of a 2FA account; logs in without password or code
+        self._user_device = user_device
+        self._two_factor_code = two_factor_code
+        self.device_revoked = False
         # Optional modules that answered 403; not requested again until reload
         self._unavailable_modules: set[str] = set()
         # Known from the config entry before the first login/log line
@@ -259,8 +267,69 @@ class SchulmanagerClient:
         dk = hashlib.pbkdf2_hmac("sha512", pw_bytes, salt_bytes, 99999, dklen=512)
         return dk.hex()
 
+    @property
+    def user_device(self) -> dict[str, Any] | None:
+        """Return the remembered device of a two-factor account, if any."""
+        return self._user_device
+
     async def async_login(self) -> None:
         """Login to Schulmanager Online."""
+        if self._user_device is not None and await self._async_login_with_device():
+            return
+        await self._async_login_with_password()
+
+    async def _async_login_with_device(self) -> bool:
+        """Login with the remembered device; return False if it was revoked."""
+        sess = async_get_clientsession(self.hass)
+        headers = common_headers() | {"Content-Type": "application/json;charset=UTF-8"}
+        body = {"device": self._user_device, "reason": "detected-logged-out"}
+        async with sess.post(DEVICE_LOGIN_URL, json=body, headers=headers) as resp:
+            if resp.status == 401:
+                _LOGGER.warning(
+                    "Schulmanager no longer accepts the remembered device; "
+                    "a new two-factor code is needed"
+                )
+                self._user_device = None
+                self.device_revoked = True
+                return False
+            text = await resp.text()
+            try:
+                data = json.loads(text)
+            except ValueError:
+                data = None
+            if resp.status != 200 or not isinstance(data, dict) or "jwt" not in data:
+                raise RuntimeError(f"device_login_failed:{resp.status}")
+
+        # Before the first dump/log line that can contain these identifiers
+        if isinstance(data.get("user"), dict):
+            register_account(data["user"])
+            register_school(self._institution_id or data["user"].get("institutionId"))
+        await self._dump(
+            "device_login_response.json",
+            {"status": resp.status, "data": sanitize_for_log(data)},
+        )
+        await self._apply_login_response(data)
+        if isinstance(data.get("userDevice"), dict):
+            self._user_device = data["userDevice"]
+        return True
+
+    async def async_delete_device(self) -> None:
+        """Remove the remembered device from the Schulmanager account."""
+        if self._user_device is None:
+            return
+        sess = async_get_clientsession(self.hass)
+        headers = common_headers() | {"Content-Type": "application/json;charset=UTF-8"}
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+        async with sess.post(
+            DELETE_DEVICE_URL, json={"device": self._user_device}, headers=headers
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"delete_device_failed:{resp.status}")
+        self._user_device = None
+
+    async def _async_login_with_password(self) -> None:
+        """Login with password, and with a two-factor code if one was given."""
         sess = async_get_clientsession(self.hass)
         salt = await self._fetch_salt(self.username)
         # ~0.5 s of CPU work (99999 PBKDF2 rounds); keep it off the event loop
@@ -276,9 +345,11 @@ class SchulmanagerClient:
             "emailOrUsername": self.username,
             "password": self.password,
             "hash": hash_hex,
-            "mobileApp": False,
+            # Only a mobile app login returns a device; without a code this
+            # would add a new device to the account on every login
+            "mobileApp": self._two_factor_code is not None,
             "userId": self._user_id,
-            "twoFactorCode": None,
+            "twoFactorCode": self._two_factor_code,
             "institutionId": self._institution_id,
         }
 
@@ -341,22 +412,31 @@ class SchulmanagerClient:
             if "jwt" not in data:
                 raise RuntimeError(f"login_failed:no_jwt:{resp.status}")
 
-            self._token = data["jwt"]
-            _LOGGER.debug("Schulmanager: authentication successful")
-            user = data.get("user") or {}
+        await self._apply_login_response(data)
+        if self._two_factor_code is not None:
+            self._two_factor_code = None
+            if isinstance(data.get("userDevice"), dict):
+                self._user_device = data["userDevice"]
+                self.device_revoked = False
 
-            if self._user_id is None and user.get("id") is not None:
-                self._user_id = user.get("id")
+    async def _apply_login_response(self, data: dict[str, Any]) -> None:
+        """Store token, ids and students of a successful login."""
+        self._token = data["jwt"]
+        _LOGGER.debug("Schulmanager: authentication successful")
+        user = data.get("user") or {}
 
-            # Extract and store institutionId if not already set
-            if self._institution_id is None:
-                self._institution_id = user.get("institutionId")
-                if self._institution_id:
-                    _LOGGER.debug("Extracted institutionId from login: %s", self._institution_id)
+        if self._user_id is None and user.get("id") is not None:
+            self._user_id = user.get("id")
 
-            self._students = self._extract_students(user)
+        # Extract and store institutionId if not already set
+        if self._institution_id is None:
+            self._institution_id = user.get("institutionId")
+            if self._institution_id:
+                _LOGGER.debug("Extracted institutionId from login: %s", self._institution_id)
 
-            await self._dump("students_extracted.json", self._students)
+        self._students = self._extract_students(user)
+
+        await self._dump("students_extracted.json", self._students)
 
     async def _discover_bundle_version(self) -> str | None:
         """Discover bundle version from JavaScript files."""
@@ -2023,11 +2103,16 @@ class SchulmanagerHubClient:
         hass: HomeAssistant,
         username: str,
         password: str,
+        user_devices: list[dict[str, Any]] | None = None,
     ) -> None:
         """Initialize unified hub client."""
         self.hass = hass
         self.username = username
         self.password = password
+        self._user_devices: list[dict[str, Any]] = list(user_devices or [])
+        # Login parameters of accounts that need a two-factor code
+        self._two_factor_pending: list[dict[str, Any]] = []
+        self.reauth_needed = False
         self._clients: dict[Any, SchulmanagerClient] = {}  # key -> client
         self._school_names: dict[Any, str] = {}  # key -> school name
         self._all_students: list[dict[str, Any]] = []
@@ -2052,13 +2137,23 @@ class SchulmanagerHubClient:
             await self._login_to_schools(schools)
         else:
             # Probe login: auto-detect single vs multi-school
+            device = self._device_for(institution_id, None)
             probe = SchulmanagerClient(
                 self.hass,
                 self.username,
                 self.password,
                 institution_id=institution_id,
+                user_device=device,
             )
-            await probe.async_login()
+            try:
+                await probe.async_login()
+            except SchulmanagerTwoFactorRequiredError:
+                self._two_factor_pending.append(
+                    {"label": "", "institution_id": institution_id, "user_id": None}
+                )
+                raise
+            finally:
+                self._sync_device(device, probe)
 
             if probe.has_token():
                 # Single-school account
@@ -2148,19 +2243,29 @@ class SchulmanagerHubClient:
                     inst_id,
                     user_id,
                 )
+                device = self._device_for(inst_id, user_id)
                 client = SchulmanagerClient(
                     self.hass,
                     self.username,
                     self.password,
-                        institution_id=inst_id,
+                    institution_id=inst_id,
                     user_id=user_id,
+                    user_device=device,
                 )
                 try:
                     await client.async_login()
+                except SchulmanagerTwoFactorRequiredError:
+                    # Definite answer for this account; another candidate would only mask it
+                    self._two_factor_pending.append(
+                        {"label": login_label, "institution_id": inst_id, "user_id": user_id}
+                    )
+                    raise
                 except Exception as err:
                     _LOGGER.debug("Login attempt for %s failed: %r", login_label, err)
                     last_err = err
                     continue
+                finally:
+                    self._sync_device(device, client)
 
                 if client.has_token():
                     school_key: Any = inst_id if inst_id is not None else (user_id or 0)
@@ -2193,9 +2298,9 @@ class SchulmanagerHubClient:
                 if isinstance(result, SchulmanagerTwoFactorRequiredError):
                     reason = "two_factor"
                     _LOGGER.warning(
-                        "The Schulmanager account at school '%s' has two-factor "
-                        "authentication enabled, which is not supported; "
-                        "its students are skipped",
+                        "The Schulmanager account at school '%s' needs a "
+                        "two-factor code; its students are skipped until the "
+                        "integration is re-authenticated",
                         school.get("label"),
                     )
                 elif isinstance(result, SchulmanagerAuthError):
@@ -2259,6 +2364,69 @@ class SchulmanagerHubClient:
         )
 
         await self._dump_summary("multi_school_login_summary.json", summary)
+
+    def _device_for(
+        self, institution_id: int | None, user_id: int | None
+    ) -> dict[str, Any] | None:
+        """Return the remembered device of the account to log into."""
+        if institution_id is None and user_id is None:
+            # Fresh single-school probe: only unambiguous with one device
+            return self._user_devices[0] if len(self._user_devices) == 1 else None
+        for device in self._user_devices:
+            if user_id is not None and device.get("userId") == user_id:
+                return device
+            if (
+                institution_id is not None
+                and (device.get("institution") or {}).get("id") == institution_id
+            ):
+                return device
+        return None
+
+    def _sync_device(
+        self, previous: dict[str, Any] | None, client: SchulmanagerClient
+    ) -> None:
+        """Replace the device a client logged in with by its current one.
+
+        The current one is None after a revocation and new after a code login.
+        """
+        current = client.user_device
+        if current is previous:
+            return
+        self._user_devices = [
+            known
+            for known in self._user_devices
+            if known is not previous
+            and (current is None or known.get("userId") != current.get("userId"))
+        ]
+        if current is not None:
+            self._user_devices.append(current)
+
+    def get_user_devices(self) -> list[dict[str, Any]]:
+        """Return the remembered devices to store in the config entry."""
+        return list(self._user_devices)
+
+    def get_two_factor_pending(self) -> list[dict[str, Any]]:
+        """Return the accounts that need a two-factor code: {"label", "institution_id", "user_id"}."""
+        return list(self._two_factor_pending)
+
+    async def async_register_device(self, account: dict[str, Any], code: str) -> None:
+        """Log into an account with a two-factor code and remember its device.
+
+        Raises SchulmanagerTwoFactorRequiredError if the code was not accepted.
+        """
+        client = SchulmanagerClient(
+            self.hass,
+            self.username,
+            self.password,
+            institution_id=account["institution_id"],
+            user_id=account["user_id"],
+            two_factor_code=code,
+        )
+        await client.async_login()
+        if client.user_device is None:
+            raise RuntimeError("Login with two-factor code returned no device")
+        self._sync_device(None, client)
+        self._two_factor_pending.remove(account)
 
     def get_all_students(self) -> list[dict[str, Any]]:
         """Return all students with school context (school_name=None for single-school)."""
@@ -2340,6 +2508,9 @@ class SchulmanagerHubClient:
 
         # Aggregate results from all schools
         for client_result in client_results:
+            if isinstance(client_result, SchulmanagerTwoFactorRequiredError):
+                # The remembered device was revoked or 2FA was switched on
+                self.reauth_needed = True
             if isinstance(client_result, BaseException):
                 _LOGGER.error("Failed to update school data: %s", client_result)
                 continue

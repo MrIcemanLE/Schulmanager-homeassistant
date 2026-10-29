@@ -26,6 +26,8 @@ SENSITIVE_KEYS = frozenset(
         "firstname",
         "hash",
         "jwt",
+        # Secret of a remembered 2FA device
+        "key",
         "lastname",
         "ldapusername",
         "localusername",
@@ -35,6 +37,7 @@ SENSITIVE_KEYS = frozenset(
         "sex",
         "street",
         "token",
+        "twofactorcode",
         "username",
         "website",
         "zipcode",

@@ -71,6 +71,16 @@
           "username": "E-Mail",
           "password": "Passwort"
         }
+      },
+      "two_factor": {
+        "title": "Zwei-Faktor-Code",
+        "description": "Für das Schulmanager-Konto {school} ist die Zwei-Faktor-Anmeldung aktiv. Gib den aktuellen Code aus deiner Authenticator-App oder aus der E-Mail von Schulmanager ein. Schulmanager merkt sich Home Assistant danach als Gerät, der Code wird also nur einmal gebraucht.",
+        "data": {
+          "code": "Code"
+        },
+        "data_description": {
+          "code": "Der aktuelle Code, meist 6 Ziffern."
+        }
       }
     },
     "error": {
@@ -78,7 +88,7 @@
       "cannot_connect": "Verbindung fehlgeschlagen",
       "no_students": "Keine Schüler in deinem Konto gefunden",
       "unknown": "Unbekannter Fehler",
-      "two_factor_required": "Für dieses Schulmanager-Konto ist die Zwei-Faktor-Anmeldung aktiv. Die Integration unterstützt sie nicht. Schalte sie in den Schulmanager-Einstellungen aus und versuche es erneut."
+      "invalid_code": "Der Code wurde nicht angenommen. Gib den aktuellen Code ein und versuche es erneut."
     },
     "abort": {
       "already_configured": "Gerät ist bereits konfiguriert",
@@ -124,8 +134,8 @@
       "description": "Schulmanager hat das eingerichtete Passwort für folgende Schulen abgelehnt: {schools}. Die Kinder dieser Schulen fehlen deshalb.\n\nBei Schulmanager hat jede Schule ein eigenes Konto, auch wenn die E-Mail-Adresse dieselbe ist, und jedes Konto hat ein eigenes Passwort. Melde dich auf https://login.schulmanager-online.de an und wähle die Schule aus: Wird das Passwort dort ebenfalls abgelehnt, stelle für alle deine Schulkonten dasselbe Passwort ein und lade die Integration neu."
     },
     "school_two_factor_required": {
-      "title": "Zwei-Faktor-Anmeldung blockiert einzelne Schulen",
-      "description": "Für das Schulmanager-Konto dieser Schulen ist die Zwei-Faktor-Anmeldung aktiv: {schools}. Die Integration kann sich nicht mit einem Code anmelden, deshalb fehlen die Kinder dieser Schulen.\n\nBei Schulmanager hat jede Schule ein eigenes Konto, und die Zwei-Faktor-Anmeldung wird pro Konto eingeschaltet. Damit die Kinder erscheinen, schalte sie in den Schulmanager-Einstellungen für das Konto dieser Schule aus und lade die Integration neu."
+      "title": "Zwei-Faktor-Code für einzelne Schulen nötig",
+      "description": "Das Schulmanager-Konto dieser Schulen verlangt einen Zwei-Faktor-Code: {schools}. Bis er eingegeben ist, fehlen die Kinder dieser Schulen.\n\nUnter Einstellungen → Geräte & Dienste bietet Home Assistant an, Schulmanager neu zu authentifizieren. Gib dort dein Passwort und den aktuellen Code ein. Schulmanager merkt sich Home Assistant danach als Gerät."
     }
   }
 }

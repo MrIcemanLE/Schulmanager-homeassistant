@@ -195,7 +195,7 @@ def sanitize_for_log(obj: Any) -> Any:
             redacted: dict[str, Any] = {}
             for k, v in obj.items():
                 lk = k.lower()
-                if lk in ("password", "jwt", "authorization", "token", "hash"):
+                if lk in ("password", "jwt", "authorization", "token", "hash", "key", "twofactorcode"):
                     redacted[k] = (v[:10] + "...(redacted)") if isinstance(v, str) and len(v) > 12 else "(redacted)"
                 else:
                     redacted[k] = sanitize_for_log(v)

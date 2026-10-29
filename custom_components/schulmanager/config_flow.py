@@ -7,6 +7,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import (
+    SOURCE_REAUTH,
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
@@ -21,6 +22,7 @@ from .api_client import (
 )
 from .const import (
     CONF_PASSWORD,
+    CONF_USER_DEVICES,
     CONF_USERNAME,
     DEFAULT_OPTIONS,
     DOMAIN,
@@ -49,6 +51,8 @@ USER_SCHEMA = vol.Schema(
         vol.Required(CONF_PASSWORD): cv.string,
     }
 )
+CONF_CODE = "code"
+TWO_FACTOR_SCHEMA = vol.Schema({vol.Required(CONF_CODE): cv.string})
 
 
 class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -61,6 +65,9 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
     # at 1 while migrations up to v3 existed but never ran).
     VERSION = 8
     MINOR_VERSION = 1
+
+    # Devices remembered after two-factor codes, used for the final login
+    _user_devices: list[dict[str, Any]] | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -79,11 +86,15 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         # Test the connection and get student data
+        hub = SchulmanagerHubClient(
+            self.hass, username, password, user_devices=self._user_devices
+        )
         try:
-            hub = SchulmanagerHubClient(self.hass, username, password)
-
             # Single call handles both single- and multi-school detection automatically
             await hub.async_login()
+
+            if hub.get_two_factor_pending():
+                return await self._async_start_two_factor(hub, user_input)
 
             if not hub.has_token():
                 errors["base"] = "invalid_auth"
@@ -99,6 +110,8 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_USERNAME: username,
                         CONF_PASSWORD: password,
                     }
+                    if devices := hub.get_user_devices():
+                        entry_data[CONF_USER_DEVICES] = devices
                     detected_schools = hub.get_detected_schools()
                     if detected_schools:
                         entry_data["schools"] = detected_schools
@@ -113,7 +126,7 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
 
         except SchulmanagerTwoFactorRequiredError:
-            errors["base"] = "two_factor_required"
+            return await self._async_start_two_factor(hub, user_input)
         except SchulmanagerAuthError:
             errors["base"] = "invalid_auth"
         except Exception:
@@ -168,19 +181,27 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
             # Reuse existing schools/institutionId from the stored entry if available
             existing_schools = None
             existing_inst_id = None
+            existing_devices = None
             if hasattr(self, "_reauth_entry") and self._reauth_entry:
                 existing_schools = self._reauth_entry.data.get("schools")
                 existing_inst_id = self._reauth_entry.data.get("institution_id")
+                existing_devices = self._reauth_entry.data.get(CONF_USER_DEVICES)
 
             hub = SchulmanagerHubClient(
                 self.hass,
                 user_input[CONF_USERNAME],
                 user_input[CONF_PASSWORD],
+                user_devices=existing_devices,
             )
-            await hub.async_login(
-                schools=existing_schools,
-                institution_id=existing_inst_id,
-            )
+            try:
+                await hub.async_login(
+                    schools=existing_schools,
+                    institution_id=existing_inst_id,
+                )
+            except SchulmanagerTwoFactorRequiredError:
+                return await self._async_start_two_factor(hub, user_input)
+            if hub.get_two_factor_pending():
+                return await self._async_start_two_factor(hub, user_input)
             if not hub.has_token():
                 raise RuntimeError("Login succeeded but no token returned")
         except Exception:  # noqa: BLE001 - config flows intentionally swallow unknown errors to prompt retry
@@ -196,18 +217,25 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors=errors,
             )
 
-        # Update the existing entry with new credentials
+        return await self._async_finish_reauth(user_input, hub)
+
+    async def _async_finish_reauth(
+        self, credentials: dict[str, Any], hub: SchulmanagerHubClient
+    ) -> ConfigFlowResult:
+        """Store the new credentials and devices and reload the entry."""
         assert hasattr(self, "_reauth_entry") and self._reauth_entry is not None
 
         # Preserve existing schools/institutionId
         update_data: dict[str, Any] = {
-            CONF_USERNAME: user_input[CONF_USERNAME],
-            CONF_PASSWORD: user_input[CONF_PASSWORD],
+            CONF_USERNAME: credentials[CONF_USERNAME],
+            CONF_PASSWORD: credentials[CONF_PASSWORD],
         }
-        if existing_schools is not None:
+        if (existing_schools := self._reauth_entry.data.get("schools")) is not None:
             update_data["schools"] = existing_schools
-        elif existing_inst_id is not None:
-            update_data["institution_id"] = existing_inst_id
+        elif (inst_id := self._reauth_entry.data.get("institution_id")) is not None:
+            update_data["institution_id"] = inst_id
+        if devices := hub.get_user_devices():
+            update_data[CONF_USER_DEVICES] = devices
 
         self.hass.config_entries.async_update_entry(
             self._reauth_entry,
@@ -215,6 +243,46 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
         return self.async_abort(reason="reauth_successful")
+
+    async def _async_start_two_factor(
+        self, hub: SchulmanagerHubClient, credentials: dict[str, Any]
+    ) -> ConfigFlowResult:
+        """Ask for a code for each school account that has 2FA enabled."""
+        self._hub = hub
+        self._credentials = credentials
+        return await self.async_step_two_factor()
+
+    async def async_step_two_factor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Log in with a two-factor code so Schulmanager remembers this device."""
+        account = self._hub.get_two_factor_pending()[0]
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                await self._hub.async_register_device(
+                    account, user_input[CONF_CODE].strip()
+                )
+            except SchulmanagerTwoFactorRequiredError:
+                errors["base"] = "invalid_code"
+            except Exception:
+                _LOGGER.exception("Login with two-factor code failed")
+                errors["base"] = "cannot_connect"
+            else:
+                if self._hub.get_two_factor_pending():
+                    return await self.async_step_two_factor()
+                if self.source == SOURCE_REAUTH:
+                    return await self._async_finish_reauth(self._credentials, self._hub)
+                # Log in again, now with the remembered devices
+                self._user_devices = self._hub.get_user_devices()
+                return await self.async_step_user(self._credentials)
+
+        return self.async_show_form(
+            step_id="two_factor",
+            data_schema=TWO_FACTOR_SCHEMA,
+            errors=errors,
+            description_placeholders={"school": account["label"] or "Schulmanager"},
+        )
 
     @staticmethod
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:

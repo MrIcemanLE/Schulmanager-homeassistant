@@ -26,6 +26,8 @@ VERSION: Final = _get_version()
 # Credentials
 CONF_USERNAME: Final = "username"
 CONF_PASSWORD: Final = "password"
+# Remembered devices of 2FA accounts, one per school account
+CONF_USER_DEVICES: Final = "user_devices"
 
 """Options / Settings."""
 OPT_ENABLE_SCHEDULE: Final = "enable_schedule"

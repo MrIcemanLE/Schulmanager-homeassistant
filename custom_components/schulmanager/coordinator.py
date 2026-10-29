@@ -107,6 +107,10 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
         except Exception as err:
             raise UpdateFailed(str(err)) from err
 
+        if self.client.reauth_needed:
+            self.client.reauth_needed = False
+            self.config_entry.async_start_reauth(self.hass)
+
         # Detect new homework/grades after the first successful refresh only
         try:
             if self._initial_refresh_done:

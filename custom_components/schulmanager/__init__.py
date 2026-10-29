@@ -17,7 +17,11 @@ from homeassistant.core import (
     ServiceResponse,
     SupportsResponse,
 )
-from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    ServiceValidationError,
+)
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.device_registry import (
     DeviceEntryType,
@@ -29,9 +33,15 @@ from homeassistant.helpers.entity_registry import (
 )
 from homeassistant.helpers.service import async_register_admin_service
 
-from .api_client import SchulmanagerHubClient
+from .api_client import (
+    SchulmanagerAuthError,
+    SchulmanagerClient,
+    SchulmanagerHubClient,
+    SchulmanagerTwoFactorRequiredError,
+)
 from .const import (
     CONF_PASSWORD,
+    CONF_USER_DEVICES,
     CONF_USERNAME,
     DOMAIN,
     OPT_ENABLE_EXAMS,
@@ -335,9 +345,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     schools = entry.data.get("schools")
     institution_id = entry.data.get("institution_id")
 
-    client = SchulmanagerHubClient(hass, username, password)
-    await client.async_login(schools=schools, institution_id=institution_id)
+    client = SchulmanagerHubClient(
+        hass, username, password, user_devices=entry.data.get(CONF_USER_DEVICES)
+    )
+    try:
+        await client.async_login(schools=schools, institution_id=institution_id)
+    except SchulmanagerTwoFactorRequiredError as err:
+        raise ConfigEntryAuthFailed("A two-factor code is needed") from err
+    except SchulmanagerAuthError as err:
+        raise ConfigEntryAuthFailed("Schulmanager rejected the password") from err
+    finally:
+        _async_store_user_devices(hass, entry, client)
     _async_update_rejected_schools_issue(hass, entry, client)
+    if client.get_two_factor_pending():
+        # Other schools keep working; the reauth flow asks for the missing codes
+        entry.async_start_reauth(hass)
 
     coordinator = SchulmanagerCoordinator(hass, client, entry)
 
@@ -410,6 +432,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def _async_store_user_devices(
+    hass: HomeAssistant, entry: ConfigEntry, client: SchulmanagerHubClient
+) -> None:
+    """Persist added or revoked 2FA devices; runs before the update listener exists."""
+    devices = client.get_user_devices()
+    if devices != entry.data.get(CONF_USER_DEVICES, []):
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_USER_DEVICES: devices}
+        )
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the config entry so changed options take effect."""
     await hass.config_entries.async_reload(entry.entry_id)
@@ -446,6 +479,25 @@ def _async_update_rejected_schools_issue(
             translation_key=translation_key,
             translation_placeholders={"schools": ", ".join(schools)},
         )
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove the remembered 2FA devices from the Schulmanager accounts."""
+    for device in entry.data.get(CONF_USER_DEVICES, []):
+        client = SchulmanagerClient(
+            hass,
+            entry.data[CONF_USERNAME],
+            entry.data[CONF_PASSWORD],
+            user_device=device,
+        )
+        try:
+            # Deleting needs a session of the device's account
+            await client.async_login()
+            await client.async_delete_device()
+        except Exception as err:  # noqa: BLE001 - removal must not fail on this
+            _LOGGER.warning(
+                "Could not remove the remembered device from Schulmanager: %s", err
+            )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

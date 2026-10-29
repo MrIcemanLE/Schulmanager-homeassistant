@@ -71,6 +71,16 @@
           "username": "E-mail",
           "password": "Password"
         }
+      },
+      "two_factor": {
+        "title": "Two-factor code",
+        "description": "The Schulmanager account for {school} has two-factor authentication enabled. Enter the current code from your authenticator app or from the Schulmanager e-mail. Schulmanager then remembers Home Assistant as a device, so the code is only needed once.",
+        "data": {
+          "code": "Code"
+        },
+        "data_description": {
+          "code": "The current code, usually 6 digits."
+        }
       }
     },
     "error": {
@@ -78,7 +88,7 @@
       "cannot_connect": "Unable to connect",
       "no_students": "No students found in your account",
       "unknown": "Unknown error",
-      "two_factor_required": "This Schulmanager account has two-factor authentication enabled, which the integration does not support. Turn it off in the Schulmanager settings and try again."
+      "invalid_code": "The code was not accepted. Enter the current code and try again."
     },
     "abort": {
       "already_configured": "Device is already configured",
@@ -124,8 +134,8 @@
       "description": "Schulmanager rejected the configured password for: {schools}. Students of these schools are missing.\n\nIn Schulmanager, every school has its own account, even when they share the same e-mail address, and each account has its own password. Log in at https://login.schulmanager-online.de and select the school: if the password is refused there as well, set the same password for all your school accounts and reload the integration."
     },
     "school_two_factor_required": {
-      "title": "Two-factor authentication blocks some schools",
-      "description": "The Schulmanager account for these schools has two-factor authentication enabled: {schools}. The integration cannot log in with a code, so students of these schools are missing.\n\nIn Schulmanager, every school has its own account, and two-factor authentication is switched on per account. To include these students, turn off two-factor authentication for the account at this school in the Schulmanager settings and reload the integration."
+      "title": "Two-factor code needed for some schools",
+      "description": "The Schulmanager account for these schools needs a two-factor code: {schools}. Students of these schools are missing until it is entered.\n\nUnder Settings → Devices & services, Home Assistant offers to re-authenticate Schulmanager. Enter your password and the current code there. Schulmanager then remembers Home Assistant as a device."
     }
   }
 }
