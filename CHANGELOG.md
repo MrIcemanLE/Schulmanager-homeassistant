@@ -1,5 +1,15 @@
 # Schulmanager Integration – Changelog
 
+## 0.13.0b2 (2026-10-29) – Beta
+
+**Kurz gesagt:** Die Beta enthält jetzt auch die Bugfixes aus 0.12.2. Am Format von `get_schedule` hat sich nichts geändert.
+
+### 🐛 Bugfixes
+
+- Alle Bugfixes aus 0.12.2: doppelte Hausaufgaben lassen sich abhaken, Stundenplanänderungen sind nach Stunde sortiert.
+
+---
+
 ## 0.13.0b1 (2026-10-29) – Beta
 
 **Kurz gesagt:** Testversion mit der neuen Aktion `schulmanager.get_schedule`, die den Stundenplan strukturiert für Karten wie die Stundenplan Suite liefert. Außerdem zeigt der Stundenplan-Kalender jetzt alle parallelen Kurse einer Stunde.
@@ -12,6 +22,17 @@
 ### 🐛 Bugfixes
 
 - **Parallele Kurse im Stundenplan-Kalender (Danke an @heilbreitenbach und @fabel-smith):** Liefert die Schule mehrere Kurse in derselben Stunde, etwa in der Oberstufe, zeigte der Kalender nur den ersten an. Jetzt erscheinen alle. Ein Entfall wird nur noch mit der Ersatzstunde desselben Kurses zusammengefasst.
+
+---
+
+## 0.12.2 (2026-10-29)
+
+**Kurz gesagt:** Doppelt eingetragene Hausaufgaben lassen sich wieder abhaken, und Stundenplanänderungen erscheinen in der Reihenfolge der Schulstunden.
+
+### 🐛 Bugfixes
+
+- **Doppelte Hausaufgaben (Danke an @micbuh, PR #18):** Wurde eine Aufgabe zweimal mit demselben Text eingetragen, ließ sich keine der beiden abhaken. Jetzt bekommt jeder Eintrag eine eigene Kennung. Bereits gesetzte Häkchen bleiben erhalten. Nur bei Hausaufgaben, deren Text am Anfang oder Ende ein Leerzeichen hat, muss das Häkchen nach dem Update einmal neu gesetzt werden.
+- **Stundenplanänderungen nach Stunde sortiert (Danke an @KoenigMjr, PR #17):** Die Änderungen für heute und morgen kamen bisher in der Reihenfolge, in der Schulmanager sie liefert, etwa 5., 2., 1. Stunde. Jetzt sind sie nach Stunde sortiert, auch in der Zusammenfassung.
 
 ---
 
