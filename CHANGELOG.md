@@ -1,5 +1,16 @@
 # Schulmanager Integration – Changelog
 
+## 0.12.2 (2026-10-29)
+
+**Kurz gesagt:** Doppelt eingetragene Hausaufgaben lassen sich wieder abhaken, und Stundenplanänderungen erscheinen in der Reihenfolge der Schulstunden.
+
+### 🐛 Bugfixes
+
+- **Doppelte Hausaufgaben (Danke an @micbuh, PR #18):** Wurde eine Aufgabe zweimal mit demselben Text eingetragen, ließ sich keine der beiden abhaken. Jetzt bekommt jeder Eintrag eine eigene Kennung. Bereits gesetzte Häkchen bleiben erhalten. Nur bei Hausaufgaben, deren Text am Anfang oder Ende ein Leerzeichen hat, muss das Häkchen nach dem Update einmal neu gesetzt werden.
+- **Stundenplanänderungen nach Stunde sortiert (Danke an @KoenigMjr, PR #17):** Die Änderungen für heute und morgen kamen bisher in der Reihenfolge, in der Schulmanager sie liefert, etwa 5., 2., 1. Stunde. Jetzt sind sie nach Stunde sortiert, auch in der Zusammenfassung.
+
+---
+
 ## 0.12.1 (2026-10-28)
 
 **Kurz gesagt:** Bei Kindern an mehreren Schulen fehlt kein Kind mehr stillschweigend. Kann sich die Integration bei einer Schule nicht anmelden, zeigt Home Assistant unter Einstellungen → Reparaturen einen Hinweis mit der Schule und dem Grund an, etwa eine aktive Zwei-Faktor-Anmeldung.
