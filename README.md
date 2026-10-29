@@ -182,6 +182,22 @@ Löscht alle Debug-Dateien im Integrationsordner, auch solche aus älteren Versi
 service: schulmanager.clear_debug
 ```
 
+### `schulmanager.get_schedule` (Beta)
+Liefert den Stundenplan aller Kinder strukturiert als Antwort, gedacht für Karten und Integrationen wie die [Stundenplan Suite](https://github.com/fabel-smith/stundenplan-suite). Die Aktion fragt Schulmanager nicht neu ab, sondern gibt die zuletzt abgerufenen Daten zurück. Optional lässt sie sich mit `config_entry_id` auf einen Schulmanager-Eintrag und mit `student_id` auf ein Kind einschränken.
+
+> ⚠️ **Beta:** Das Format kann sich bis zur stabilen Version 0.13.0 noch ändern. Die Aktion ist vorerst nur in Beta-Versionen enthalten. Dafür in HACS für Schulmanager Online Vorabversionen (Pre-Release) zulassen.
+
+```yaml
+action: schulmanager.get_schedule
+data:
+  student_id: "1234567"   # optional
+response_variable: stundenplan
+```
+
+Pro Kind enthält die Antwort einen `status` (`ok`, `stale` = letzter Abruf fehlgeschlagen, ältere Daten, `unavailable` = noch keine Daten), den abgerufenen Zeitraum, die Stundenzeiten und für jeden Tag die Stunden mit Fach, Kurs bzw. Gruppe, Lehrkräften, Räumen und Änderungen. Liefert die Schule mehrere Kurse in derselben Stunde, erscheint jeder Kurs einzeln.
+
+Sobald sich der Stundenplan eines Kindes ändert, löst die Integration das Ereignis `schulmanager_schedule_updated` aus (mit `config_entry_id` und `student_ids`).
+
 ## 📝 Beispiel Lovelace-Karte
 
 ```yaml

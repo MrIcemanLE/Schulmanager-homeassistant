@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
 class ScheduleChange(TypedDict, total=False):
@@ -38,6 +38,11 @@ class SchedulePayload(TypedDict):
     # Map of ISO date (YYYY-MM-DD) to list of lessons for the current week
     week: dict[str, list[dict[str, Any]]]
     changes: ScheduleChanges
+    # Only set when the fetch succeeded
+    fetched_at: NotRequired[str]
+    range_start: NotRequired[str]
+    range_end: NotRequired[str]
+    class_hours: NotRequired[list[dict[str, Any]]]
 
 
 class GradeEntry(TypedDict, total=False):

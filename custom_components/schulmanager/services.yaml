@@ -8,3 +8,23 @@ refresh:
 clear_debug:
   name: Debug-Ordner leeren
   description: Löscht alle Debug-Dateien im Integrationsordner.
+get_schedule:
+  name: Stundenplan abrufen (Beta)
+  description: >-
+    Liefert den bereits abgerufenen Stundenplan strukturiert als Antwort, z. B. für
+    Stundenplan-Karten. Fragt Schulmanager nicht neu ab. Das Format kann sich in
+    Beta-Versionen noch ändern.
+  fields:
+    config_entry_id:
+      name: Schulmanager-Eintrag
+      description: Nur diesen Eintrag abfragen. Ohne Angabe werden alle Einträge geliefert.
+      required: false
+      selector:
+        config_entry:
+          integration: schulmanager
+    student_id:
+      name: Schüler-ID
+      description: Nur dieses Kind liefern (die Schulmanager-ID des Kindes).
+      required: false
+      selector:
+        text:

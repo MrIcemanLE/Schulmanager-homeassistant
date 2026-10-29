@@ -111,3 +111,14 @@ def extract_original_info(lesson: dict[str, Any]) -> dict[str, str]:
         if any(info.values()):
             return info
     return {"subject": "", "subject_full": "", "room": "", "teacher": ""}
+
+
+def student_group_ids(record: dict[str, Any] | None) -> set[Any]:
+    """Return the ids of the student groups (class or course) a lesson record is for."""
+    if not isinstance(record, dict):
+        return set()
+    return {
+        group.get("id")
+        for group in record.get("studentGroups") or []
+        if isinstance(group, dict) and group.get("id") is not None
+    }

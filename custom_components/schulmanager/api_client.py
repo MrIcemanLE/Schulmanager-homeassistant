@@ -946,8 +946,12 @@ class SchulmanagerClient:
                 "data": response_data
             })
 
-            # Parse batch response
-            return self._parse_batch_schedule_response(response_data, today)
+            payload = self._parse_batch_schedule_response(response_data, today)
+            # Marks a successful fetch; failed fetches yield a payload without it
+            payload["fetched_at"] = dt_util.now().isoformat()
+            payload["range_start"] = start_of_week.isoformat()
+            payload["range_end"] = end_of_range.isoformat()
+            return payload
 
     def _parse_batch_schedule_response(
         self, response_data: dict[str, Any], reference_date: date
@@ -1047,7 +1051,8 @@ class SchulmanagerClient:
                 "today": changes_today,
                 "tomorrow": changes_tomorrow,
                 "summary": self._generate_changes_summary(changes_today, changes_tomorrow)
-            }
+            },
+            "class_hours": list(class_hours_map.values()),
         }
 
 

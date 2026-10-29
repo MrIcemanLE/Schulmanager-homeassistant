@@ -1,5 +1,20 @@
 # Schulmanager Integration – Changelog
 
+## 0.13.0b1 (2026-10-29) – Beta
+
+**Kurz gesagt:** Testversion mit der neuen Aktion `schulmanager.get_schedule`, die den Stundenplan strukturiert für Karten wie die Stundenplan Suite liefert. Außerdem zeigt der Stundenplan-Kalender jetzt alle parallelen Kurse einer Stunde.
+
+### 🧪 Neu (Beta)
+
+- **Aktion `schulmanager.get_schedule`** liefert den zuletzt abgerufenen Stundenplan aller Kinder als strukturierte Antwort: Zeitraum, Stundenzeiten und pro Tag alle Stunden mit Fach, Kurs bzw. Gruppe, Lehrkräften, Räumen und Änderungen. Ein Status zeigt, ob die Daten aktuell sind. Das Format ist mit der Stundenplan Suite abgestimmt, kann sich bis Version 0.13.0 aber noch ändern.
+- **Ereignis `schulmanager_schedule_updated`**, sobald sich der Stundenplan eines Kindes ändert.
+
+### 🐛 Bugfixes
+
+- **Parallele Kurse im Stundenplan-Kalender (Danke an @heilbreitenbach und @fabel-smith):** Liefert die Schule mehrere Kurse in derselben Stunde, etwa in der Oberstufe, zeigte der Kalender nur den ersten an. Jetzt erscheinen alle. Ein Entfall wird nur noch mit der Ersatzstunde desselben Kurses zusammengefasst.
+
+---
+
 ## 0.12.1 (2026-10-28)
 
 **Kurz gesagt:** Bei Kindern an mehreren Schulen fehlt kein Kind mehr stillschweigend. Kann sich die Integration bei einer Schule nicht anmelden, zeigt Home Assistant unter Einstellungen → Reparaturen einen Hinweis mit der Schule und dem Grund an, etwa eine aktive Zwei-Faktor-Anmeldung.

@@ -18,7 +18,7 @@ from .const import (
     OPT_SCHEDULE_HIGHLIGHT,
 )
 from .coordinator import SchulmanagerCoordinator
-from .lesson_info import normalize_hour
+from .lesson_info import normalize_hour, student_group_ids
 from .privacy import get_logger
 from .util import normalize_student_slug
 
@@ -443,7 +443,8 @@ class ScheduleCalendar(CalendarEntity):
 
         If a cancelled lesson and a replacement (substitution/special) occur for the
         same hour, only create the replacement event and mention the cancelled lesson
-        in the description to avoid duplicates.
+        in the description to avoid duplicates. Parallel lessons of other groups
+        (e.g. upper-school courses) stay separate events.
         """
         out: list[CalendarEvent] = []
 
@@ -476,23 +477,30 @@ class ScheduleCalendar(CalendarEntity):
             cancelled = [itm for itm in items if itm.get("type") == "cancelledLesson"]
             active = [itm for itm in items if itm.get("type") != "cancelledLesson"]
 
-            if active:
-                chosen = active[0]
-                start_dt, end_dt = self._lesson_times(date_str, chosen)
-                summary, description = self._lesson_texts(chosen)
+            replaced: dict[int, dict] = {}
+            unmatched: list[dict] = []
+            for canc in cancelled:
+                target = self._replacement_index(canc, active)
+                if target is None or target in replaced:
+                    unmatched.append(canc)
+                else:
+                    replaced[target] = canc
+
+            for index, lesson in enumerate(active):
+                start_dt, end_dt = self._lesson_times(date_str, lesson)
+                summary, description = self._lesson_texts(lesson)
                 # Append info about cancelled original if present
-                if cancelled:
-                    oi = original_info(cancelled[0])
+                if index in replaced:
+                    oi = original_info(replaced[index])
                     if oi:
                         description = (description + "\n" if description else "") + f"Ursprünglich: {oi}"
                 out.append(
                     CalendarEvent(start=start_dt, end=end_dt, summary=summary, description=description)
                 )
-            else:
-                # Only cancellations present
-                if (not self.highlight) and self.hide_cancelled_no_highlight:
-                    continue
-                canc = cancelled[0]
+
+            if (not self.highlight) and self.hide_cancelled_no_highlight:
+                continue
+            for canc in unmatched:
                 start_dt, end_dt = self._lesson_times(date_str, canc)
                 summary, description = self._lesson_texts(canc)
                 out.append(
@@ -500,6 +508,29 @@ class ScheduleCalendar(CalendarEntity):
                 )
 
         return out
+
+    @staticmethod
+    def _replacement_index(cancelled: dict, active: list[dict]) -> int | None:
+        """Return the index of the active lesson that replaces a cancelled one.
+
+        Match by student group so a cancelled course is not attached to a parallel
+        course of other students; without group data a single active lesson is
+        assumed to be the replacement.
+        """
+        groups = set().union(
+            *(student_group_ids(o) for o in cancelled.get("originalLessons") or [])
+        )
+        if groups:
+            matches = [
+                i
+                for i, lesson in enumerate(active)
+                if groups & student_group_ids(lesson.get("actualLesson"))
+            ]
+            if len(matches) == 1:
+                return matches[0]
+            if matches or any(student_group_ids(a.get("actualLesson")) for a in active):
+                return None
+        return 0 if len(active) == 1 else None
 
     def _lesson_times(self, date_str: str, lesson: dict) -> tuple[datetime, datetime]:
         """Derive start/end datetimes for a lesson."""

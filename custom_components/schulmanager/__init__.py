@@ -7,11 +7,18 @@ from pathlib import Path
 import shutil
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
+import voluptuous as vol
+
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+)
+from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
+from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.device_registry import (
     DeviceEntryType,
     async_get as async_get_device_registry,
@@ -37,10 +44,21 @@ from .const import (
 )
 from .coordinator import SchulmanagerCoordinator
 from .privacy import get_logger
+from .schedule_export import SCHEMA_VERSION, STATUS_OK, STATUS_STALE
 
 _LOGGER = get_logger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.TODO, Platform.CALENDAR, Platform.BUTTON]
+
+ATTR_CONFIG_ENTRY_ID = "config_entry_id"
+ATTR_STUDENT_ID = "student_id"
+SERVICE_GET_SCHEDULE = "get_schedule"
+GET_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(ATTR_STUDENT_ID): cv.string,
+    }
+)
 
 
 # unique_id suffix -> deterministic object_id suffix to rename broken
@@ -448,6 +466,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, "clear_cache")
         hass.services.async_remove(DOMAIN, "refresh")
         hass.services.async_remove(DOMAIN, "clear_debug")
+        hass.services.async_remove(DOMAIN, SERVICE_GET_SCHEDULE)
 
     return unload_ok
 
@@ -479,6 +498,49 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             await hass.async_add_executor_job(shutil.rmtree, debug_path)
             _LOGGER.info("Cleared debug files")
 
+    async def get_schedule_service(call: ServiceCall) -> ServiceResponse:
+        """Return the structured schedules already fetched; never calls Schulmanager."""
+        if entry_id := call.data.get(ATTR_CONFIG_ENTRY_ID):
+            entry = hass.config_entries.async_get_entry(entry_id)
+            if (
+                entry is None
+                or entry.domain != DOMAIN
+                or entry.state is not ConfigEntryState.LOADED
+            ):
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="config_entry_not_loaded",
+                    translation_placeholders={"entry_id": entry_id},
+                )
+            entries = [entry]
+        else:
+            entries = [
+                entry
+                for entry in hass.config_entries.async_entries(DOMAIN)
+                if entry.state is ConfigEntryState.LOADED
+            ]
+
+        student_id = call.data.get(ATTR_STUDENT_ID)
+        students: list[dict[str, Any]] = []
+        for entry in entries:
+            coordinator: SchulmanagerCoordinator = entry.runtime_data["coordinator"]
+            for export in coordinator.schedule_exports.values():
+                if student_id is not None and export["student_id"] != student_id:
+                    continue
+                # A failed refresh keeps the previous data without rebuilding exports
+                if (
+                    export["status"] == STATUS_OK
+                    and not coordinator.last_update_success
+                ):
+                    export = {**export, "status": STATUS_STALE}
+                students.append(export)
+
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "source": DOMAIN,
+            "students": students,
+        }
+
     # Register services only once
     if not hass.services.has_service(DOMAIN, "clear_cache"):
         hass.services.async_register(DOMAIN, "clear_cache", clear_cache_service)
@@ -486,4 +548,11 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         # Deletes files, so restricted to administrators
         async_register_admin_service(
             hass, DOMAIN, "clear_debug", clear_debug_service
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_GET_SCHEDULE,
+            get_schedule_service,
+            schema=GET_SCHEDULE_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
         )

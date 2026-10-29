@@ -21,6 +21,12 @@ from .const import (
     OPT_SCHEDULE_WEEKS,
 )
 from .privacy import get_logger
+from .schedule_export import (
+    STATUS_OK,
+    STATUS_STALE,
+    export_student_schedule,
+    without_fetch_time,
+)
 from .types import IntegrationData
 from .utils import (
     CooldownManager,
@@ -29,6 +35,9 @@ from .utils import (
 )
 
 _LOGGER = get_logger(__name__)
+
+EVENT_SCHEDULE_UPDATED = "schulmanager_schedule_updated"
+
 
 class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
     """Coordinator for Schulmanager integration with cooldown support."""
@@ -56,6 +65,8 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
         self._initial_refresh_done = False
         self._seen_homework: set[str] = set()
         self._seen_grades: set[str] = set()
+        # student_id -> structured schedule for schulmanager.get_schedule
+        self.schedule_exports: dict[str, dict[str, Any]] = {}
 
         _LOGGER.info(
             "Schulmanager coordinator initialized with %d hour automatic update interval",
@@ -107,7 +118,47 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
         except Exception as err:  # noqa: BLE001 - defensive guard, do not break updates
             _LOGGER.debug("Event detection error: %s", err)
 
+        try:
+            self._update_schedule_exports(self.config_entry.entry_id, data)
+        except Exception:  # noqa: BLE001 - the export must never break sensor updates
+            _LOGGER.exception("Building the structured schedule failed")
+
         return cast(IntegrationData, data)
+
+    def _update_schedule_exports(self, entry_id: str, data: dict[str, Any]) -> None:
+        """Rebuild the structured schedules and announce the students whose data changed.
+
+        A failed fetch keeps the last good schedule, marked as stale.
+        """
+        exports: dict[str, dict[str, Any]] = {}
+        for student in data.get("students", []):
+            sid = str(student.get("id"))
+            export = export_student_schedule(
+                entry_id,
+                student,
+                (data.get("schedule") or {}).get(sid),
+            )
+            previous = self.schedule_exports.get(sid)
+            if export["status"] != STATUS_OK and previous and previous["days"]:
+                export = {**previous, "status": STATUS_STALE}
+            exports[sid] = export
+
+        changed = [
+            sid
+            for sid, export in exports.items()
+            if sid not in self.schedule_exports
+            or without_fetch_time(export)
+            != without_fetch_time(self.schedule_exports[sid])
+        ]
+        self.schedule_exports = exports
+        if changed:
+            self.hass.bus.async_fire(
+                EVENT_SCHEDULE_UPDATED,
+                {
+                    "config_entry_id": entry_id,
+                    "student_ids": changed,
+                },
+            )
 
     def _seed_seen_sets(self, data: dict[str, Any]) -> None:
         for st in data.get("students", []):
