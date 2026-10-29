@@ -25,12 +25,18 @@ STORAGE_VERSION = 1
 STORAGE_KEY_PREFIX = f"{DOMAIN}_todo"
 
 
-def _make_uid(student_id: str, item: dict) -> str:
-    """Generate unique ID for homework item."""
-    date = item.get("date", "")
-    subject = item.get("subject", "")
-    homework = item.get("homework", "")
+def _make_uid(student_id: str, item: dict, occurrence: int = 0) -> str:
+    """Generate a stable ID for homework items, including duplicates.
+
+    For identical homework payloads we keep the first item's legacy UID and
+    disambiguate additional occurrences with an occurrence suffix.
+    """
+    date = str(item.get("date", "")).strip()
+    subject = str(item.get("subject", "")).strip()
+    homework = str(item.get("homework", "")).strip()
     key = f"{student_id}_{date}{subject}{homework}"
+    if occurrence > 0:
+        key = f"{key}#{occurrence}"
     return hashlib.md5(key.encode("utf-8")).hexdigest()
 
 
@@ -44,7 +50,9 @@ async def async_setup_entry(
     coord = runtime.get("coordinator")
     client = runtime.get("client")
     if coord is None or client is None:
-        missing = [n for n, v in {"coordinator": coord, "client": client}.items() if v is None]
+        missing = [
+            n for n, v in {"coordinator": coord, "client": client}.items() if v is None
+        ]
         _LOGGER.warning(
             "Runtime data incomplete for entry %s: missing %s; skipping todo setup",
             entry.entry_id,
@@ -83,7 +91,12 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
     _attr_supported_features = TodoListEntityFeature.UPDATE_TODO_ITEM
 
     def __init__(
-        self, client: Any, coordinator: SchulmanagerCoordinator, student_id: str, student_name: str, slug: str
+        self,
+        client: Any,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        slug: str,
     ) -> None:
         """Initialize a homework todo list entity for a student."""
         super().__init__(coordinator)
@@ -149,7 +162,9 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         """Handle updated data from the coordinator."""
         coord_data = cast(dict[str, Any] | None, self.coordinator.data)
         homework_data: dict[str, list[dict[str, Any]]] = (
-            {} if coord_data is None else cast(dict[str, list[dict[str, Any]]], coord_data.get("homework", {}))
+            {}
+            if coord_data is None
+            else cast(dict[str, list[dict[str, Any]]], coord_data.get("homework", {}))
         )
         student_homework = homework_data.get(self.student_id, [])
 
@@ -162,16 +177,26 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         # Build map of current in-memory items for status lookup
         existing_items: dict[str, TodoItem] = {}
         if self._attr_todo_items:
-            existing_items = {item.uid: item for item in self._attr_todo_items if item.uid}
+            existing_items = {
+                item.uid: item for item in self._attr_todo_items if item.uid
+            }
 
         if not student_homework:
             self._attr_todo_items = []
         else:
             todo_items: list[TodoItem] = []
             current_uids: set[str] = set()
+            duplicate_counters: dict[str, int] = {}
 
             for item in student_homework:
-                uid = _make_uid(self.student_id, item)
+                base_uid = _make_uid(self.student_id, item)
+                occurrence = duplicate_counters.get(base_uid, 0)
+                uid = (
+                    base_uid
+                    if occurrence == 0
+                    else _make_uid(self.student_id, item, occurrence)
+                )
+                duplicate_counters[base_uid] = occurrence + 1
                 current_uids.add(uid)
 
                 subject = item.get("subject", "").strip()
@@ -179,7 +204,11 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
                 date = item.get("date", "").strip()
 
                 if subject and homework:
-                    title = f"[{date}] {subject}: {homework}" if date else f"{subject}: {homework}"
+                    title = (
+                        f"[{date}] {subject}: {homework}"
+                        if date
+                        else f"{subject}: {homework}"
+                    )
                 elif homework:
                     title = homework
                 elif subject:
@@ -199,12 +228,24 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
                     status = TodoItemStatus(persisted)
                     _LOGGER.debug(
                         "Restored persisted status for TodoItem: %s (uid: %s, status: %s)",
-                        title[:50], uid[:8], status,
+                        title[:50],
+                        uid[:8],
+                        status,
                     )
                 else:
                     status = TodoItemStatus.NEEDS_ACTION
 
                 todo_items.append(TodoItem(summary=title, uid=uid, status=status))
+
+            duplicate_uid_groups = sum(
+                1 for count in duplicate_counters.values() if count > 1
+            )
+            if duplicate_uid_groups:
+                _LOGGER.debug(
+                    "Disambiguated duplicate homework UIDs for student %s: %d groups",
+                    self.student_id,
+                    duplicate_uid_groups,
+                )
 
             # Log removed items
             if existing_items:
