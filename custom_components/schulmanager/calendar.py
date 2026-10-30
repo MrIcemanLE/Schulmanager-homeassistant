@@ -171,6 +171,7 @@ class ExamCalendarBase(CalendarEntity):
         data = cast(dict[str, Any], self.coordinator.data)
         items = self._iter_exam_items(data)
         now = dt_util.now()
+        next_exam: tuple[datetime, datetime, dict[str, Any]] | None = None
 
         for exam in items:
             times = self._exam_times(exam)
@@ -178,19 +179,20 @@ class ExamCalendarBase(CalendarEntity):
                 continue
             start_time, end_time = times
 
-            # Return the next upcoming exam
-            if end_time >= now:
-                summary = self._generate_exam_summary(exam)
-                description = self._generate_exam_description(exam)
+            # Pick the earliest exam that has not ended yet. The API order is not chronological; on equal start the API order is kept.
+            if end_time >= now and (next_exam is None or start_time < next_exam[0]):
+                next_exam = (start_time, end_time, exam)
 
-                return CalendarEvent(
-                    start=start_time,
-                    end=end_time,
-                    summary=summary,
-                    description=description,
-                )
+        if next_exam is None:
+            return None
 
-        return None
+        start_time, end_time, exam = next_exam
+        return CalendarEvent(
+            start=start_time,
+            end=end_time,
+            summary=self._generate_exam_summary(exam),
+            description=self._generate_exam_description(exam),
+        )
 
     async def async_get_events(
         self,
@@ -225,6 +227,8 @@ class ExamCalendarBase(CalendarEntity):
                     description=description,
                 )
             )
+
+        out.sort(key=lambda event: event.start)
 
         return out
 
