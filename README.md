@@ -34,10 +34,11 @@ Voraussetzung: Home Assistant 2024.6 oder neuer.
    - Einstellungen → Geräte & Dienste → Integration hinzufügen
    - "Schulmanager Online" auswählen
    - Zugangsdaten (E-Mail + Passwort) eingeben
+   - Ist für das Schulmanager-Konto die Zwei-Faktor-Anmeldung aktiv, fragt Home Assistant danach einmal nach dem Code aus der Authenticator-App oder der E-Mail (ab v0.13.0b3, Beta)
 
 2. **Multi-School Accounts**
    - Bei Kindern an mehreren Schulen werden automatisch alle Kinder eingebunden
-   - Jede Schule hat bei Schulmanager ein eigenes Konto. Damit alle Kinder erscheinen, brauchen alle Schulkonten dasselbe Passwort, und die Zwei-Faktor-Anmeldung muss ausgeschaltet sein. Klappt eine Schule nicht, zeigt Home Assistant unter Einstellungen → Reparaturen einen Hinweis an
+   - Jede Schule hat bei Schulmanager ein eigenes Konto. Damit alle Kinder erscheinen, brauchen alle Schulkonten dasselbe Passwort. Ist bei einem Schulkonto die Zwei-Faktor-Anmeldung aktiv, wird der Code für diese Schule einzeln abgefragt. Klappt eine Schule nicht, zeigt Home Assistant unter Einstellungen → Reparaturen einen Hinweis an
    - Jeder Schüler erhält einen "Schule"-Sensor zur Identifikation
 
 3. **Konfiguration anpassen**
@@ -233,6 +234,9 @@ A: Automatisch einmal pro Stunde. Zusätzlich lässt sich jederzeit manuell aktu
 
 **Q: Werden Noten im Punktesystem der gymnasialen Oberstufe (Sek II) unterstützt?**
 A: Ja, ab v0.10.0. Kurse mit dem 0–15-Punkte-System werden automatisch erkannt und korrekt dargestellt – keine Konfiguration nötig. Der Gesamtdurchschnitt wird im Notensystem berechnet, in dem die meisten Fächer benotet sind (beide Systeme werden nie gemischt), und trägt im Punktesystem die Einheit „Punkte“. Er ist ein einfacher Mittelwert der Kurse, keine Abitur-Prognose.
+
+**Q: Funktioniert die Zwei-Faktor-Anmeldung von Schulmanager?**
+A: Ja, ab v0.13.0b3 (Beta). Bei der Einrichtung gibst du den Code einmal ein. Schulmanager merkt sich Home Assistant danach wie die Schulmanager-App als Gerät, weitere Anmeldungen brauchen keinen Code. Läuft das Gerät ab oder wird es entfernt, erscheint unter Einstellungen → System → Reparaturen der Hinweis „Zwei-Faktor-Code nötig“. Ein Klick darauf öffnet einen Dialog, in dem du nur den aktuellen Code eingibst. Entfernst du die Integration, wird das Gerät auch aus deinem Schulmanager-Konto gelöscht.
 
 **Q: Was passiert, wenn sich mein Schulmanager-Passwort ändert?**
 A: Home Assistant zeigt automatisch eine Reauth-Benachrichtigung an, über die du die neuen Zugangsdaten eingeben kannst, ohne die Integration neu einzurichten.

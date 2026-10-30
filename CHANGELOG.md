@@ -1,5 +1,26 @@
 # Schulmanager Integration – Changelog
 
+## 0.13.0b3 (2026-10-30) – Beta
+
+**Kurz gesagt:** Schulmanager-Konten mit Zwei-Faktor-Anmeldung funktionieren jetzt. Der Code wird einmal abgefragt, danach meldet sich die Integration wie die Schulmanager-App über ein gemerktes Gerät an. Am Format von `get_schedule` hat sich nichts geändert.
+
+### 🧪 Neu (Beta)
+
+- **Zwei-Faktor-Anmeldung (Danke an @apfelbasti, Issue #16)**
+  - Einrichtung und erneute Anmeldung fragen den Code ab, bei mehreren Schulen für jede betroffene Schule einzeln.
+  - Danach merkt sich Schulmanager Home Assistant als Gerät, weitere Anmeldungen brauchen weder Code noch Passwort.
+  - Getestet mit einer Authenticator-App. Ein Code per E-Mail sollte genauso funktionieren, ist aber noch ungetestet.
+- **Reparaturhinweis „Zwei-Faktor-Code nötig“:** Er erscheint, wenn das gemerkte Gerät abläuft oder entfernt wurde oder die Zwei-Faktor-Anmeldung neu eingeschaltet wurde. Ein Klick öffnet einen Dialog, der nur den aktuellen Code abfragt.
+- Entfernst du die Integration, wird das gemerkte Gerät auch aus deinem Schulmanager-Konto gelöscht.
+- Der Geräteschlüssel und der Code werden in Protokollen und Diagnosedaten geschwärzt.
+
+### 🐛 Bugfixes
+
+- Kann sich die Integration bei keiner Schule anmelden, weil ein Code fehlt, versucht sie es nicht mehr ständig erneut, sondern wartet auf den Code.
+- Ältere Einträge kannten nur „School 12345“ statt des Schulnamens. Nach der nächsten erfolgreichen Anmeldung wird der echte Name gespeichert.
+
+---
+
 ## 0.13.0b2 (2026-10-29) – Beta
 
 **Kurz gesagt:** Die Beta enthält jetzt auch die Bugfixes aus 0.12.2. Am Format von `get_schedule` hat sich nichts geändert.
