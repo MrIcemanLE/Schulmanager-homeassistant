@@ -1,5 +1,15 @@
 # Schulmanager Integration – Changelog
 
+## 0.13.0b4 (2026-10-30) – Beta
+
+**Kurz gesagt:** Ein Kurs, der auf mehrere Räume aufgeteilt ist, kommt in `get_schedule` jetzt als ein Eintrag mit allen Räumen an.
+
+### 🐛 Bugfixes
+
+- **Aufgeteilte Kurse (Danke an Larry und @fabel-smith, stundenplan-card #16):** Schulmanager kennt pro Stunde nur einen Raum und schickt deshalb für jeden Raum einen eigenen Eintrag. Diese Einträge werden jetzt zu einem zusammengefasst, z. B. mit `rooms: ["EDV1", "EDV2"]`. Die ID bleibt die der Stunde, der Zusatz `-2` fällt weg. Unterscheiden sich die Einträge in mehr als dem Raum, bleiben sie wie bisher getrennt.
+
+---
+
 ## 0.13.0b3 (2026-10-30) – Beta
 
 **Kurz gesagt:** Schulmanager-Konten mit Zwei-Faktor-Anmeldung funktionieren jetzt. Der Code wird einmal abgefragt, danach meldet sich die Integration wie die Schulmanager-App über ein gemerktes Gerät an. Am Format von `get_schedule` hat sich nichts geändert.

@@ -204,6 +204,44 @@ def export_lesson(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_MERGED_LISTS = ("rooms", "changes", "notes")
+
+
+def _without_rooms(lesson: dict[str, Any]) -> dict[str, Any]:
+    original = lesson["original"]
+    return {
+        **{key: value for key, value in lesson.items() if key not in _MERGED_LISTS},
+        "original": original
+        and {key: value for key, value in original.items() if key != "rooms"},
+    }
+
+
+def _merge_split_rooms(lessons: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Join the entries of a course that is split across several rooms.
+
+    A Schulmanager lesson has a single room field, so such a course arrives as
+    one entry per room with the same lessonId.
+    """
+    merged: list[dict[str, Any]] = []
+    first_by_id: dict[str, dict[str, Any]] = {}
+    for lesson in lessons:
+        first = first_by_id.get(lesson["id"])
+        if first is None or _without_rooms(first) != _without_rooms(lesson):
+            first_by_id.setdefault(lesson["id"], lesson)
+            merged.append(lesson)
+            continue
+        for key in _MERGED_LISTS:
+            first[key] = first[key] + [v for v in lesson[key] if v not in first[key]]
+        if first["original"]:
+            rooms = first["original"]["rooms"]
+            first["original"] = {
+                **first["original"],
+                "rooms": rooms
+                + [r for r in lesson["original"]["rooms"] if r not in rooms],
+            }
+    return merged
+
+
 def export_periods(class_hours: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return the school's default period times, ordered by period."""
     periods = [
@@ -227,11 +265,13 @@ def export_days(
     last = date.fromisoformat(range_end)
     while current <= last:
         day = current.isoformat()
-        lessons = [
-            export_lesson(entry)
-            for entry in week.get(day) or []
-            if isinstance(entry, dict)
-        ]
+        lessons = _merge_split_rooms(
+            [
+                export_lesson(entry)
+                for entry in week.get(day) or []
+                if isinstance(entry, dict)
+            ]
+        )
         seen: dict[str, int] = {}
         for lesson in lessons:
             # Guard against duplicate ids should the API ever repeat a slot
