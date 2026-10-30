@@ -19,6 +19,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
+    ConfigEntryError,
     ConfigEntryNotReady,
     ServiceValidationError,
 )
@@ -54,6 +55,7 @@ from .const import (
 )
 from .coordinator import SchulmanagerCoordinator
 from .privacy import get_logger
+from .repairs import TWO_FACTOR_ISSUE, async_create_two_factor_issue, school_label
 from .schedule_export import SCHEMA_VERSION, STATUS_OK, STATUS_STALE
 
 _LOGGER = get_logger(__name__)
@@ -351,18 +353,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await client.async_login(schools=schools, institution_id=institution_id)
     except SchulmanagerTwoFactorRequiredError as err:
-        raise ConfigEntryAuthFailed("A two-factor code is needed") from err
+        async_create_two_factor_issue(
+            hass,
+            entry,
+            [
+                school_label(account["label"])
+                for account in client.get_two_factor_pending()
+            ],
+        )
+        # Retrying cannot help; the repair flow asks for the code and reloads
+        raise ConfigEntryError("A two-factor code is needed") from err
     except SchulmanagerAuthError as err:
         raise ConfigEntryAuthFailed("Schulmanager rejected the password") from err
     finally:
-        _async_store_user_devices(hass, entry, client)
+        _async_store_login_results(hass, entry, client)
     _async_update_rejected_schools_issue(hass, entry, client)
-    if client.get_two_factor_pending():
-        if not client.has_token():
-            # Retrying the setup cannot help; it would only repeat the login
-            raise ConfigEntryAuthFailed("A two-factor code is needed")
-        # Other schools keep working; the reauth flow asks for the missing codes
-        entry.async_start_reauth(hass)
+    if client.get_two_factor_pending() and not client.has_token():
+        raise ConfigEntryError("A two-factor code is needed")
 
     coordinator = SchulmanagerCoordinator(hass, client, entry)
 
@@ -435,15 +442,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-def _async_store_user_devices(
+def _async_store_login_results(
     hass: HomeAssistant, entry: ConfigEntry, client: SchulmanagerHubClient
 ) -> None:
-    """Persist added or revoked 2FA devices; runs before the update listener exists."""
-    devices = client.get_user_devices()
-    if devices != entry.data.get(CONF_USER_DEVICES, []):
-        hass.config_entries.async_update_entry(
-            entry, data={**entry.data, CONF_USER_DEVICES: devices}
-        )
+    """Persist 2FA devices and school names; runs before the update listener exists."""
+    data = {**entry.data, CONF_USER_DEVICES: client.get_user_devices()}
+    if not data[CONF_USER_DEVICES]:
+        del data[CONF_USER_DEVICES]
+    if entry.data.get("schools") and (schools := client.get_schools()):
+        data["schools"] = schools
+    hass.config_entries.async_update_entry(entry, data=data)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -454,7 +462,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 # Failed-school reasons that the user can fix in their Schulmanager account
 _SCHOOL_LOGIN_ISSUES = {
     "password": "school_login_rejected",
-    "two_factor": "school_two_factor_required",
+    "two_factor": TWO_FACTOR_ISSUE,
 }
 
 
@@ -472,6 +480,11 @@ def _async_update_rejected_schools_issue(
         schools = [school["label"] for school in failed if school["reason"] == reason]
         if not schools:
             ir.async_delete_issue(hass, DOMAIN, issue_id)
+            continue
+        if reason == "two_factor":
+            async_create_two_factor_issue(
+                hass, entry, [school_label(label) for label in schools]
+            )
             continue
         ir.async_create_issue(
             hass,

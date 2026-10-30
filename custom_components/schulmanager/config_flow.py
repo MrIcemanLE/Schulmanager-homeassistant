@@ -42,6 +42,7 @@ from .const import (
     OPT_SCHEDULE_WEEKS,
 )
 from .privacy import get_logger
+from .repairs import CODE_SCHEMA, CONF_CODE, school_label
 
 _LOGGER = get_logger(__name__)
 
@@ -51,8 +52,6 @@ USER_SCHEMA = vol.Schema(
         vol.Required(CONF_PASSWORD): cv.string,
     }
 )
-CONF_CODE = "code"
-TWO_FACTOR_SCHEMA = vol.Schema({vol.Required(CONF_CODE): cv.string})
 
 
 class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -279,9 +278,9 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="two_factor",
-            data_schema=TWO_FACTOR_SCHEMA,
+            data_schema=CODE_SCHEMA,
             errors=errors,
-            description_placeholders={"school": account["label"] or "Schulmanager"},
+            description_placeholders={"school": school_label(account["label"])},
         )
 
     @staticmethod

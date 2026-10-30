@@ -134,8 +134,31 @@
       "description": "Schulmanager hat das eingerichtete Passwort für folgende Schulen abgelehnt: {schools}. Die Kinder dieser Schulen fehlen deshalb.\n\nBei Schulmanager hat jede Schule ein eigenes Konto, auch wenn die E-Mail-Adresse dieselbe ist, und jedes Konto hat ein eigenes Passwort. Melde dich auf https://login.schulmanager-online.de an und wähle die Schule aus: Wird das Passwort dort ebenfalls abgelehnt, stelle für alle deine Schulkonten dasselbe Passwort ein und lade die Integration neu."
     },
     "school_two_factor_required": {
-      "title": "Zwei-Faktor-Code für einzelne Schulen nötig",
-      "description": "Das Schulmanager-Konto dieser Schulen verlangt einen Zwei-Faktor-Code: {schools}. Bis er eingegeben ist, fehlen die Kinder dieser Schulen.\n\nUnter Einstellungen → Geräte & Dienste bietet Home Assistant an, Schulmanager neu zu authentifizieren. Gib dort dein Passwort und den aktuellen Code ein. Schulmanager merkt sich Home Assistant danach als Gerät."
+      "title": "Zwei-Faktor-Code nötig",
+      "description": "Schulmanager verlangt einen neuen Zwei-Faktor-Code für: {schools}. Bis er eingegeben ist, fehlen die Kinder dieser Schulen.\n\nDas passiert, wenn das Gerät, das Schulmanager sich für Home Assistant gemerkt hat, abgelaufen ist oder entfernt wurde, oder wenn die Zwei-Faktor-Anmeldung eingeschaltet wurde.",
+      "fix_flow": {
+        "step": {
+          "code": {
+            "title": "Zwei-Faktor-Code eingeben",
+            "description": "Gib den aktuellen Code für das Schulmanager-Konto von {school} ein, aus deiner Authenticator-App oder aus der E-Mail von Schulmanager. Schulmanager merkt sich Home Assistant danach wieder als Gerät.",
+            "data": {
+              "code": "Code"
+            },
+            "data_description": {
+              "code": "Der aktuelle Code, meist 6 Ziffern."
+            }
+          }
+        },
+        "error": {
+          "invalid_code": "Der Code wurde nicht angenommen. Gib den aktuellen Code ein und versuche es erneut.",
+          "cannot_connect": "Keine Verbindung zu Schulmanager. Versuche es später erneut."
+        },
+        "abort": {
+          "password_rejected": "Schulmanager hat das gespeicherte Passwort abgelehnt. Authentifiziere die Integration unter Einstellungen → Geräte & Dienste neu.",
+          "cannot_connect": "Keine Verbindung zu Schulmanager. Versuche es später erneut.",
+          "entry_removed": "Die Schulmanager-Integration wurde entfernt."
+        }
+      }
     }
   }
 }

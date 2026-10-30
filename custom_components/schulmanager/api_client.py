@@ -2112,7 +2112,10 @@ class SchulmanagerHubClient:
         self._user_devices: list[dict[str, Any]] = list(user_devices or [])
         # Login parameters of accounts that need a two-factor code
         self._two_factor_pending: list[dict[str, Any]] = []
-        self.reauth_needed = False
+        # Stored school records, with real names where only "School <id>" was known
+        self._schools: list[dict[str, Any]] | None = None
+        # Schools whose account asked for a code during the last update
+        self.two_factor_schools: list[str] = []
         self._clients: dict[Any, SchulmanagerClient] = {}  # key -> client
         self._school_names: dict[Any, str] = {}  # key -> school name
         self._all_students: list[dict[str, Any]] = []
@@ -2291,6 +2294,7 @@ class SchulmanagerHubClient:
 
         # Process results
         summary: list[dict[str, Any]] = []
+        self._schools = []
 
         for school, result in zip(schools, results, strict=True):
             if isinstance(result, Exception):
@@ -2317,6 +2321,7 @@ class SchulmanagerHubClient:
                 self._failed_schools.append(
                     {"label": school.get("label") or "", "reason": reason}
                 )
+                self._schools.append(school)
                 summary.append(
                     {
                         "school_id": school.get("id"),
@@ -2330,6 +2335,7 @@ class SchulmanagerHubClient:
             school_id, school_name, client = result
             self._clients[school_id] = client
             self._school_names[school_id] = school_name
+            self._schools.append(self._with_real_name(school, school_name))
 
             # Collect students from this school and add school info
             students = client.get_students()
@@ -2364,6 +2370,22 @@ class SchulmanagerHubClient:
         )
 
         await self._dump_summary("multi_school_login_summary.json", summary)
+
+    @staticmethod
+    def _with_real_name(school: dict[str, Any], name: str) -> dict[str, Any]:
+        """Replace a migrated "School <id>" label by the school's name.
+
+        The id of such a record is an institution id; it is kept explicitly
+        because the placeholder label was what identified it as one.
+        """
+        raw_id = school.get("id")
+        if name and school.get("label") == f"School {raw_id}":
+            return {**school, "label": name, "institutionId": raw_id}
+        return school
+
+    def get_schools(self) -> list[dict[str, Any]] | None:
+        """Return the school records to store, or None if none were given."""
+        return self._schools
 
     def _device_for(
         self, institution_id: int | None, user_id: int | None
@@ -2507,10 +2529,11 @@ class SchulmanagerHubClient:
         client_results = await asyncio.gather(*update_tasks, return_exceptions=True)
 
         # Aggregate results from all schools
-        for client_result in client_results:
+        self.two_factor_schools = []
+        for school_key, client_result in zip(self._clients, client_results, strict=True):
             if isinstance(client_result, SchulmanagerTwoFactorRequiredError):
-                # The remembered device was revoked or 2FA was switched on
-                self.reauth_needed = True
+                # The remembered device expired or was removed, or 2FA was switched on
+                self.two_factor_schools.append(self.get_school_name(school_key))
             if isinstance(client_result, BaseException):
                 _LOGGER.error("Failed to update school data: %s", client_result)
                 continue

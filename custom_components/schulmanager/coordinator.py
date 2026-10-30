@@ -21,6 +21,7 @@ from .const import (
     OPT_SCHEDULE_WEEKS,
 )
 from .privacy import get_logger
+from .repairs import async_create_two_factor_issue
 from .schedule_export import (
     STATUS_OK,
     STATUS_STALE,
@@ -107,9 +108,10 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
         except Exception as err:
             raise UpdateFailed(str(err)) from err
 
-        if self.client.reauth_needed:
-            self.client.reauth_needed = False
-            self.config_entry.async_start_reauth(self.hass)
+        if self.client.two_factor_schools:
+            async_create_two_factor_issue(
+                self.hass, self.config_entry, self.client.two_factor_schools
+            )
 
         # Detect new homework/grades after the first successful refresh only
         try:
