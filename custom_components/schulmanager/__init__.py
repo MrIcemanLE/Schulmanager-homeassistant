@@ -358,6 +358,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _async_store_user_devices(hass, entry, client)
     _async_update_rejected_schools_issue(hass, entry, client)
     if client.get_two_factor_pending():
+        if not client.has_token():
+            # Retrying the setup cannot help; it would only repeat the login
+            raise ConfigEntryAuthFailed("A two-factor code is needed")
         # Other schools keep working; the reauth flow asks for the missing codes
         entry.async_start_reauth(hass)
 
