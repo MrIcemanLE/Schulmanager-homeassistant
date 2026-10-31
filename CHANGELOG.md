@@ -1,5 +1,15 @@
 # Schulmanager Integration – Changelog
 
+## 0.13.0b5 (2026-10-31) – Beta
+
+**Kurz gesagt:** Die Kalender „Arbeiten“ und „Schultermine“ zeigen als nächsten Termin jetzt wirklich den frühesten. Am Format von `get_schedule` hat sich nichts geändert.
+
+### 🐛 Bugfixes
+
+- **Nächster Termin chronologisch (Danke an @KoenigMjr, PR #19):** Bisher galt der erste noch nicht beendete Eintrag in der Reihenfolge, in der Schulmanager die Termine liefert. Dadurch zeigten die Attribute teils einen späteren Termin, und der Kalender blieb „aus“, obwohl gerade eine Arbeit lief. Jetzt zählt der früheste noch nicht beendete Termin, und die Termine kommen nach Beginn sortiert.
+
+---
+
 ## 0.13.0b4 (2026-10-30) – Beta
 
 **Kurz gesagt:** Ein Kurs, der auf mehrere Räume aufgeteilt ist, kommt in `get_schedule` jetzt als ein Eintrag mit allen Räumen an.
