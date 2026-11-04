@@ -955,11 +955,7 @@ class SchulmanagerClient:
         # Get bundle version (with fallback to dummy value)
         bundle_version = await self._discover_bundle_version()
 
-        # Calculate range: current week plus N-1 upcoming weeks
-        start_of_week = today - timedelta(days=today.weekday())
-        weeks = max(weeks, 1)
-        weeks = min(weeks, 3)
-        end_of_range = start_of_week + timedelta(days=(7 * weeks) - 1)
+        start_of_week, end_of_range = self._schedule_range(today, weeks)
 
         # Create request payload exactly like the browser
         batch_payload = {
@@ -1446,6 +1442,19 @@ class SchulmanagerClient:
 
         # Last resort: create a generic name
         return f"Fach {subject_id}", f"F{str(subject_id)[-2:]}"
+
+    @staticmethod
+    def _schedule_range(today: date, weeks: int) -> tuple[date, date]:
+        """Return the (start, end) dates of the current week plus N-1 upcoming weeks.
+
+        On weekends the current week is over, so one more week is fetched to keep
+        the configured look-ahead beyond the coming week.
+        """
+        start_of_week = today - timedelta(days=today.weekday())
+        weeks = min(max(weeks, 1), 3)
+        if today.weekday() >= 5:
+            weeks += 1
+        return start_of_week, start_of_week + timedelta(days=(7 * weeks) - 1)
 
     @staticmethod
     def _school_year_range(today: date) -> tuple[date, date]:

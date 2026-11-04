@@ -34,7 +34,7 @@ Voraussetzung: Home Assistant 2024.6 oder neuer.
    - Einstellungen → Geräte & Dienste → Integration hinzufügen
    - "Schulmanager Online" auswählen
    - Zugangsdaten (E-Mail + Passwort) eingeben
-   - Ist für das Schulmanager-Konto die Zwei-Faktor-Anmeldung aktiv, fragt Home Assistant danach einmal nach dem Code aus der Authenticator-App oder der E-Mail (ab v0.13.0b3, Beta)
+   - Ist für das Schulmanager-Konto die Zwei-Faktor-Anmeldung aktiv, fragt Home Assistant danach einmal nach dem Code aus der Authenticator-App oder der E-Mail (ab v0.13.0)
 
 2. **Multi-School Accounts**
    - Bei Kindern an mehreren Schulen werden automatisch alle Kinder eingebunden
@@ -59,7 +59,7 @@ Voraussetzung: Home Assistant 2024.6 oder neuer.
 ### Stundenplan-Einstellungen
 | Parameter | Standard | Beschreibung |
 |-----------|----------|--------------|
-| **Stundenplan Wochen im Voraus** | 2 | Wie viele Wochen im Voraus geladen werden (1-3) |
+| **Stundenplan Wochen im Voraus** | 2 | Wie viele Wochen ab der laufenden Woche geladen werden (1-3). Am Samstag und Sonntag kommt eine Woche dazu, weil die laufende Woche dann vorbei ist |
 | **Emoji-Hervorhebung** | ✅ Ein | Markiert Änderungen: ❌ Entfall, 🔁 Vertretung/geänderter Unterricht, 🚪 Raumwechsel, 📝 Prüfung |
 | **Ausfälle ausblenden** | ❌ Aus | Versteckt Ausfälle wenn Emoji-Hervorhebung deaktiviert ist |
 
@@ -183,10 +183,10 @@ Löscht alle Debug-Dateien im Integrationsordner, auch solche aus älteren Versi
 service: schulmanager.clear_debug
 ```
 
-### `schulmanager.get_schedule` (Beta)
+### `schulmanager.get_schedule`
 Liefert den Stundenplan aller Kinder strukturiert als Antwort, gedacht für Karten und Integrationen wie die [Stundenplan Suite](https://github.com/fabel-smith/stundenplan-suite). Die Aktion fragt Schulmanager nicht neu ab, sondern gibt die zuletzt abgerufenen Daten zurück. Optional lässt sie sich mit `config_entry_id` auf einen Schulmanager-Eintrag und mit `student_id` auf ein Kind einschränken.
 
-> ⚠️ **Beta:** Das Format kann sich bis zur stabilen Version 0.13.0 noch ändern. Die Aktion ist vorerst nur in Beta-Versionen enthalten. Dafür in HACS für Schulmanager Online Vorabversionen (Pre-Release) zulassen.
+Das Format trägt `schema_version: 1`. Neue Angaben kommen nur als zusätzliche Felder hinzu. Ändert sich ein bestehendes Feld, steigt `schema_version`.
 
 ```yaml
 action: schulmanager.get_schedule
@@ -236,7 +236,7 @@ A: Automatisch einmal pro Stunde. Zusätzlich lässt sich jederzeit manuell aktu
 A: Ja, ab v0.10.0. Kurse mit dem 0–15-Punkte-System werden automatisch erkannt und korrekt dargestellt – keine Konfiguration nötig. Der Gesamtdurchschnitt wird im Notensystem berechnet, in dem die meisten Fächer benotet sind (beide Systeme werden nie gemischt), und trägt im Punktesystem die Einheit „Punkte“. Er ist ein einfacher Mittelwert der Kurse, keine Abitur-Prognose.
 
 **Q: Funktioniert die Zwei-Faktor-Anmeldung von Schulmanager?**
-A: Ja, ab v0.13.0b3 (Beta). Bei der Einrichtung gibst du den Code einmal ein. Schulmanager merkt sich Home Assistant danach wie die Schulmanager-App als Gerät, weitere Anmeldungen brauchen keinen Code. Läuft das Gerät ab oder wird es entfernt, erscheint unter Einstellungen → System → Reparaturen der Hinweis „Zwei-Faktor-Code nötig“. Ein Klick darauf öffnet einen Dialog, in dem du nur den aktuellen Code eingibst. Entfernst du die Integration, wird das Gerät auch aus deinem Schulmanager-Konto gelöscht.
+A: Ja, ab v0.13.0. Bei der Einrichtung gibst du den Code einmal ein. Schulmanager merkt sich Home Assistant danach wie die Schulmanager-App als Gerät, weitere Anmeldungen brauchen keinen Code. Läuft das Gerät ab oder wird es entfernt, erscheint unter Einstellungen → System → Reparaturen der Hinweis „Zwei-Faktor-Code nötig“. Ein Klick darauf öffnet einen Dialog, in dem du nur den aktuellen Code eingibst. Entfernst du die Integration, wird das Gerät auch aus deinem Schulmanager-Konto gelöscht.
 
 **Q: Was passiert, wenn sich mein Schulmanager-Passwort ändert?**
 A: Home Assistant zeigt automatisch eine Reauth-Benachrichtigung an, über die du die neuen Zugangsdaten eingeben kannst, ohne die Integration neu einzurichten.

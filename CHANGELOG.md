@@ -1,5 +1,30 @@
 # Schulmanager Integration – Changelog
 
+## 0.13.0 (2026-11-04)
+
+**Kurz gesagt:** Schulmanager-Konten mit Zwei-Faktor-Anmeldung funktionieren jetzt. Neu ist außerdem die Aktion `schulmanager.get_schedule`, die den Stundenplan strukturiert für Karten wie die Stundenplan Suite liefert, und am Wochenende wird eine Woche mehr Stundenplan geladen.
+
+### ✨ Neu
+
+- **Zwei-Faktor-Anmeldung (Danke an @apfelbasti, Issue #16)**
+  - Einrichtung und erneute Anmeldung fragen den Code ab, bei mehreren Schulen für jede betroffene Schule einzeln.
+  - Danach merkt sich Schulmanager Home Assistant wie die Schulmanager-App als Gerät. Weitere Anmeldungen brauchen weder Code noch Passwort.
+  - Läuft das Gerät ab oder wird es entfernt, erscheint unter Einstellungen → Reparaturen der Hinweis „Zwei-Faktor-Code nötig“. Ein Klick öffnet einen Dialog, der nur den aktuellen Code abfragt.
+  - Entfernst du die Integration, wird das gemerkte Gerät auch aus deinem Schulmanager-Konto gelöscht.
+  - Getestet mit einer Authenticator-App. Ein Code per E-Mail sollte genauso funktionieren, ist aber noch ungetestet. Rückmeldungen dazu sind willkommen.
+- **Aktion `schulmanager.get_schedule` (abgestimmt mit @fabel-smith für die Stundenplan Suite):** Liefert den zuletzt abgerufenen Stundenplan aller Kinder als strukturierte Antwort, mit Zeitraum, Stundenzeiten und pro Tag allen Stunden mit Fach, Kurs bzw. Gruppe, Lehrkräften, Räumen und Änderungen. Ein auf mehrere Räume aufgeteilter Kurs kommt als ein Eintrag mit allen Räumen. Das Format trägt `schema_version: 1` und bleibt stabil.
+- **Ereignis `schulmanager_schedule_updated`**, sobald sich der Stundenplan eines Kindes ändert.
+- **Mehr Vorschau am Wochenende (Danke an Larry, stundenplan-card #16):** Am Samstag und Sonntag lädt die Integration eine Woche mehr, weil die laufende Woche dann vorbei ist. Mit der Standardeinstellung von 2 Wochen sind am Wochenende also die nächste und die übernächste Woche da.
+
+### 🐛 Bugfixes
+
+- **Parallele Kurse im Stundenplan-Kalender (Danke an @heilbreitenbach und @fabel-smith):** Liefert die Schule mehrere Kurse in derselben Stunde, etwa in der Oberstufe, zeigte der Kalender nur den ersten an. Jetzt erscheinen alle. Ein Entfall wird nur noch mit der Ersatzstunde desselben Kurses zusammengefasst.
+- **Nächster Termin chronologisch (Danke an @KoenigMjr, PR #19):** Die Kalender „Arbeiten“ und „Schultermine“ zeigen als nächsten Termin jetzt wirklich den frühesten, und die Termine kommen nach Beginn sortiert.
+- Kann sich die Integration bei keiner Schule anmelden, weil ein Code fehlt, versucht sie es nicht mehr ständig erneut, sondern wartet auf den Code.
+- Ältere Einträge kannten nur „School 12345“ statt des Schulnamens. Nach der nächsten erfolgreichen Anmeldung wird der echte Name gespeichert.
+
+---
+
 ## 0.13.0b5 (2026-10-31) – Beta
 
 **Kurz gesagt:** Die Kalender „Arbeiten“ und „Schultermine“ zeigen als nächsten Termin jetzt wirklich den frühesten. Am Format von `get_schedule` hat sich nichts geändert.
