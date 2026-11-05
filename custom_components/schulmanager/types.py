@@ -110,3 +110,5 @@ class IntegrationData(_IntegrationDataBase, total=False):
     messages_unread: list[dict[str, Any]]
     # Total number of unread messenger messages
     messages_unread_count: int
+    # student_id -> entry types with their class book entries, as returned by the API
+    classbook: dict[str, list[dict[str, Any]]]

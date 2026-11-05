@@ -36,6 +36,7 @@ OPT_ENABLE_EXAMS: Final = "enable_exams"
 OPT_ENABLE_GRADES: Final = "enable_grades"
 OPT_ENABLE_LETTERS: Final = "enable_letters"  # Unread parent letters (Elternbriefe)
 OPT_ENABLE_MESSAGES: Final = "enable_messages"  # Unread messenger conversations
+OPT_ENABLE_CLASSBOOK: Final = "enable_classbook"  # Class book entries
 OPT_RANGE_PAST_DAYS: Final = "range_past_days"
 OPT_RANGE_FUTURE_DAYS: Final = "range_future_days"
 OPT_REFRESH_COOLDOWN: Final = "refresh_cooldown"  # Minutes (5-30)
@@ -53,6 +54,8 @@ DEFAULT_ENABLE_EXAMS: Final = True
 DEFAULT_ENABLE_GRADES: Final = True
 DEFAULT_ENABLE_LETTERS: Final = True
 DEFAULT_ENABLE_MESSAGES: Final = True
+# Off: the texts are sensitive and visible to every Home Assistant user
+DEFAULT_ENABLE_CLASSBOOK: Final = False
 DEFAULT_RANGE_PAST_DAYS: Final = 30
 DEFAULT_RANGE_FUTURE_DAYS: Final = 180
 DEFAULT_REFRESH_COOLDOWN: Final = 5  # 5 minutes cooldown between manual refreshes
@@ -71,6 +74,7 @@ DEFAULT_OPTIONS: Final = {
     OPT_ENABLE_GRADES: DEFAULT_ENABLE_GRADES,
     OPT_ENABLE_LETTERS: DEFAULT_ENABLE_LETTERS,
     OPT_ENABLE_MESSAGES: DEFAULT_ENABLE_MESSAGES,
+    OPT_ENABLE_CLASSBOOK: DEFAULT_ENABLE_CLASSBOOK,
     OPT_RANGE_PAST_DAYS: DEFAULT_RANGE_PAST_DAYS,
     OPT_RANGE_FUTURE_DAYS: DEFAULT_RANGE_FUTURE_DAYS,
     OPT_REFRESH_COOLDOWN: DEFAULT_REFRESH_COOLDOWN,

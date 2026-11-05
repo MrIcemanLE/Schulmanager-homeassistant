@@ -11,6 +11,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
+from .classbook import flatten_entries
 from .const import (
     DOMAIN,
     OPT_ENABLE_SCHEDULE,
@@ -68,6 +69,9 @@ async def async_setup_entry(
         # Exams calendars
         entities.append(ExamsCalendar(client, coord, sid, name, slug))
         entities.append(SchoolEventsCalendar(client, coord, sid, name, slug))
+        # Only present if enabled and the school offers the module
+        if sid in (coord.data or {}).get("classbook", {}):
+            entities.append(ClassbookCalendar(client, coord, sid, name, slug))
         # Schedule calendar (optional)
         if enable_schedule:
             entities.append(
@@ -375,6 +379,54 @@ class SchoolEventsCalendar(ExamCalendarBase):
         if not description_parts:
             return "Schulweiter Termin"
         return "\n".join(description_parts)
+
+
+class ClassbookCalendar(ExamCalendarBase):
+    """Calendar entity for class book entries, as all-day events."""
+
+    def __init__(
+        self,
+        client: Any,
+        coordinator: SchulmanagerCoordinator,
+        student_id: str,
+        student_name: str,
+        slug: str,
+    ) -> None:
+        """Initialize the calendar entity."""
+        super().__init__(
+            client,
+            coordinator,
+            student_id,
+            student_name,
+            slug,
+            unique_suffix="classbook",
+            name_suffix="Klassenbuch",
+            icon="mdi:book-alert-outline",
+        )
+
+    @property
+    def event(self) -> CalendarEvent | None:
+        """Return no current event, so the logbook of this calendar only shows entries."""
+        return None
+
+    def _iter_exam_items(self, data: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return the entries of this student."""
+        return flatten_entries((data.get("classbook") or {}).get(self.student_id) or [])
+
+    def _generate_exam_summary(self, exam: dict) -> str:
+        """Generate summary text for a class book entry."""
+        return " ".join(x for x in (exam["type"], exam["subject_abbreviation"]) if x)
+
+    def _generate_exam_description(self, exam: dict) -> str:
+        """Generate description text for a class book entry."""
+        parts = [
+            f"{label}: {exam[field]}"
+            for label, field in (("Fach", "subject"), ("Lehrkraft", "teacher"))
+            if exam[field]
+        ]
+        if exam["text"]:
+            parts.append(exam["text"])
+        return "\n".join(parts)
 
 
 class ScheduleCalendar(CalendarEntity):

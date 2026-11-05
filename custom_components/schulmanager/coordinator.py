@@ -7,15 +7,19 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 if TYPE_CHECKING:
     from .api_client import SchulmanagerHubClient
 
+from .classbook import EVENT_CLASSBOOK_NEW, classbook_store, entry_keys, flatten_entries
 from .const import (
     DEFAULT_SCHEDULE_WEEKS,
+    DOMAIN,
     OPT_RANGE_FUTURE_DAYS,
     OPT_RANGE_PAST_DAYS,
     OPT_SCHEDULE_WEEKS,
@@ -66,6 +70,10 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
         self._initial_refresh_done = False
         self._seen_homework: set[str] = set()
         self._seen_grades: set[str] = set()
+        # student_id -> keys of announced entries; persisted, unlike the sets above,
+        # so entries made while Home Assistant was stopped are still announced
+        self._classbook_store = classbook_store(hass, config_entry.entry_id)
+        self._seen_classbook: dict[str, set[str]] | None = None
         # student_id -> structured schedule for schulmanager.get_schedule
         self.schedule_exports: dict[str, dict[str, Any]] = {}
 
@@ -125,11 +133,85 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
             _LOGGER.debug("Event detection error: %s", err)
 
         try:
+            await self._async_announce_classbook_entries(
+                self.config_entry.entry_id, data, enabled_features["classbook"]
+            )
+        except Exception:  # Announcing must never break sensor updates
+            _LOGGER.exception("Announcing class book entries failed")
+
+        try:
             self._update_schedule_exports(self.config_entry.entry_id, data)
         except Exception:  # noqa: BLE001 - the export must never break sensor updates
             _LOGGER.exception("Building the structured schedule failed")
 
         return cast(IntegrationData, data)
+
+    async def _async_announce_classbook_entries(
+        self, entry_id: str, data: dict[str, Any], enabled: bool
+    ) -> None:
+        """Fire an event for each new class book entry.
+
+        The first entries of a student only seed the store. An empty answer is
+        skipped there, because a failed request looks the same.
+        """
+        if self._seen_classbook is None:
+            stored = await self._classbook_store.async_load() or {}
+            self._seen_classbook = {sid: set(keys) for sid, keys in stored.items()}
+
+        if not enabled:
+            # Entries made while switched off must not be announced after switching on
+            if self._seen_classbook:
+                self._seen_classbook = {}
+                await self._classbook_store.async_remove()
+            return
+
+        names = {str(s.get("id")): s.get("name") for s in data.get("students", [])}
+        ent_reg = er.async_get(self.hass)
+        payloads: list[dict[str, Any]] = []
+        changed = False
+        for sid, entry_types in (data.get("classbook") or {}).items():
+            if not entry_types and sid not in self._seen_classbook:
+                continue
+            announce = sid in self._seen_classbook
+            seen = self._seen_classbook.setdefault(sid, set())
+            changed = changed or not announce
+            entries = flatten_entries(entry_types)
+            # Oldest first, so several new entries arrive in order
+            for key, entry in reversed(list(zip(entry_keys(entries), entries, strict=True))):
+                if key in seen:
+                    continue
+                seen.add(key)
+                changed = True
+                if announce:
+                    payloads.append(
+                        {
+                            "config_entry_id": entry_id,
+                            "student_id": sid,
+                            "student_name": names.get(str(sid), ""),
+                            # The calendar, as logbook filters drop sensors with a unit
+                            "entity_id": ent_reg.async_get_entity_id(
+                                "calendar",
+                                DOMAIN,
+                                f"schulmanager_{entry_id}_{sid}_classbook",
+                            ),
+                            **entry,
+                        }
+                    )
+
+        if changed:
+            await self._classbook_store.async_save(
+                {sid: sorted(keys) for sid, keys in self._seen_classbook.items()}
+            )
+
+        if payloads:
+
+            @callback
+            def _fire(_hass: HomeAssistant) -> None:
+                for payload in payloads:
+                    self.hass.bus.async_fire(EVENT_CLASSBOOK_NEW, payload)
+
+            # Automations do not listen yet during startup
+            async_at_started(self.hass, _fire)
 
     def _update_schedule_exports(self, entry_id: str, data: dict[str, Any]) -> None:
         """Rebuild the structured schedules and announce the students whose data changed.

@@ -55,6 +55,7 @@ Voraussetzung: Home Assistant 2024.6 oder neuer.
 | **Noten abrufen** | ✅ Ein | Noten-Sensoren pro Fach und Gesamtdurchschnitt |
 | **Ungelesene Elternbriefe abrufen** | ✅ Ein | Sensor mit Anzahl und Details ungelesener Elternbriefe |
 | **Ungelesene Nachrichten abrufen** | ✅ Ein | Sensor mit Anzahl ungelesener Messenger-Nachrichten und betroffenen Unterhaltungen |
+| **Klassenbucheinträge abrufen** | ❌ Aus | Kalender, Zähler und Ereignis mit Logbucheintrag bei neuen Einträgen ([Details](#-klassenbuch)) |
 
 ### Stundenplan-Einstellungen
 | Parameter | Standard | Beschreibung |
@@ -80,6 +81,7 @@ Die Integration legt pro Schüler ein Gerät an, dazu das Gerät „Schulmanager
 - `calendar.<schüler>_stundenplan` – Wöchentlicher Stundenplan mit Änderungen
 - `calendar.<schüler>_arbeiten` – Klausuren und Tests
 - `calendar.<schüler>_schultermine` – Schulweite Events (z.B. Schulball, BLF)
+- `calendar.<schüler>_klassenbuch` – Klassenbucheinträge als ganztägige Termine (nur wenn aktiviert)
 
 ### Sensoren
 - `sensor.<schüler>_aktuelle_stunde` – Aktuelle Unterrichtsstunde (Echtzeit, Minutenaktualisierung)
@@ -90,6 +92,7 @@ Die Integration legt pro Schüler ein Gerät an, dazu das Gerät „Schulmanager
 - `sensor.<schüler>_tage_bis_nachste_arbeit` – Tage bis zur nächsten Arbeit
 - `sensor.<schüler>_noten_<fachkürzel>` – Noten pro Fach (z. B. `noten_ma`, `noten_de`)
 - `sensor.<schüler>_noten_gesamt` – Gesamtdurchschnitt
+- `sensor.<schüler>_klassenbuch` – Anzahl der Klassenbucheinträge im laufenden Schuljahr bzw. Halbjahr (nur wenn aktiviert)
 - `sensor.<schüler>_schule` – Schulname (Diagnose)
 - `sensor.<schüler>_schul_id` – Schul-ID (Diagnose)
 
@@ -134,6 +137,29 @@ action:
 ```
 
 Beide Ereignisse enthalten `student_id` und `student_name`. `schulmanager_homework_new` liefert die Hausaufgabe unter `item` (u. a. `date`, `subject`, `homework`), `schulmanager_grade_new` zusätzlich `subject_id`, `subject_name` und unter `grade` die Note (u. a. `display_value` wie „2-“ oder „11“, `date`, `topic`).
+
+### Neue Klassenbucheinträge
+```yaml
+trigger:
+  - platform: event
+    event_type: schulmanager_classbook_new
+action:
+  - service: notify.mobile_app
+    data:
+      title: "Klassenbuch {{ trigger.event.data.student_name }}: {{ trigger.event.data.type }}"
+      message: "{{ trigger.event.data.subject }} ({{ trigger.event.data.teacher }}): {{ trigger.event.data.text }}"
+```
+
+Nur bestimmte Eintragsarten melden, zum Beispiel keine Sportbefreiungen:
+```yaml
+trigger:
+  - platform: event
+    event_type: schulmanager_classbook_new
+    event_data:
+      type: Fehlverhalten
+```
+
+Mehr dazu unter [Klassenbuch](#-klassenbuch).
 
 ### Stundenplan-Benachrichtigung
 ```yaml
@@ -198,6 +224,71 @@ response_variable: stundenplan
 Pro Kind enthält die Antwort einen `status` (`ok`, `stale` = letzter Abruf fehlgeschlagen, ältere Daten, `unavailable` = noch keine Daten), den abgerufenen Zeitraum, die Stundenzeiten und für jeden Tag die Stunden mit Fach, Kurs bzw. Gruppe, Lehrkräften, Räumen und Änderungen. Liefert die Schule mehrere Kurse in derselben Stunde, erscheint jeder Kurs einzeln.
 
 Sobald sich der Stundenplan eines Kindes ändert, löst die Integration das Ereignis `schulmanager_schedule_updated` aus (mit `config_entry_id` und `student_ids`).
+
+## 📒 Klassenbuch
+
+Zeigt die Einträge, die Eltern im Portal unter **Berichte → Einträge** sehen. Dafür muss die Schule sie für Eltern freigeben. Verfügbar ab Version 0.14.0b1. Die Funktion ist ab Werk aus und lässt sich in den Optionen der Integration mit **Klassenbucheinträge abrufen** einschalten.
+
+> **Datenschutz:** Die Texte können sensibel sein (etwa bei Fehlverhalten) und sind für alle Benutzer deiner Home-Assistant-Installation sichtbar. Ereignisse und Logbucheinträge samt Text landen in der Verlaufsdatenbank, das Attribut `entries` des Sensors nicht. Diagnose-Downloads enthalten weder die Texte noch die Namen der Lehrkräfte.
+
+### Ereignis `schulmanager_classbook_new`
+
+Wird für jeden neuen Eintrag einmal ausgelöst, auch wenn der Eintrag entstanden ist, während Home Assistant aus war. Beim ersten Abruf gibt es keine Ereignisse, die vorhandenen Einträge gelten dann als bekannt. Neue Einträge werden beim stündlichen Abruf erkannt.
+
+| Feld | Inhalt |
+|------|--------|
+| `student_id`, `student_name` | Kind |
+| `config_entry_id` | Zugang in Home Assistant |
+| `entity_id` | Klassenbuch-Kalender des Kindes |
+| `date` | Datum des Eintrags (`2026-09-25`) |
+| `type` | Eintragsart, von der Schule festgelegt (z. B. `Fehlverhalten`) |
+| `subject`, `subject_abbreviation` | Fach (kann leer sein) |
+| `teacher` | Lehrkraft (kann leer sein) |
+| `text` | Text des Eintrags (kann leer sein) |
+
+Das Portal vergibt keine Kennung für Einträge. Ändert eine Lehrkraft einen Eintrag nachträglich, zählt er deshalb als neu und löst das Ereignis noch einmal aus. Beispiele für Automationen stehen unter [Ereignisse & Automatisierungen](#-ereignisse--automatisierungen).
+
+### Logbuch
+
+Jeder neue Eintrag erscheint im Logbuch von Home Assistant, zum Beispiel: *Max Mustermann Klassenbuch: Fehlverhalten (Geographie, Eva Meier): Text des Eintrags*. Die Logbuch-Karte zeigt die Einträge eines Kindes, wenn sie auf dessen Kalender zeigt:
+
+```yaml
+type: logbook
+title: Klassenbuch
+hours_to_show: 240
+target:
+  entity_id: calendar.schueler_beispiel_klassenbuch
+```
+
+Das Logbuch enthält nur Einträge, die seit dem Einschalten neu dazugekommen sind, und Home Assistant behält seinen Verlauf standardmäßig 10 Tage (`purge_keep_days`). Für einen vollständigen Überblick eignet sich die Karte im nächsten Abschnitt.
+
+### Übersicht mit Filter fürs Dashboard
+
+Das Attribut `entries` des Sensors enthält alle Einträge des laufenden Schuljahres bzw. Halbjahres (das legt das Portal fest), das Attribut `counts` die Anzahl je Eintragsart. Damit lässt sich eine filterbare Liste bauen:
+
+1. Unter **Einstellungen → Geräte & Dienste → Helfer** einen Helfer vom Typ **Dropdown** mit dem Namen `Klassenbuch Art` anlegen. Als Optionen `Alle` und die Eintragsarten deiner Schule eintragen. Die Namen stehen im Attribut `counts`.
+2. Diese Karte ins Dashboard einfügen und die Sensor-ID anpassen:
+
+```yaml
+type: vertical-stack
+cards:
+  - type: entities
+    entities:
+      - input_select.klassenbuch_art
+  - type: markdown
+    title: Klassenbuch
+    content: |
+      {% set art = states('input_select.klassenbuch_art') %}
+      {% set eintraege = state_attr('sensor.schueler_beispiel_klassenbuch', 'entries') or [] %}
+      {% if art != 'Alle' %}{% set eintraege = eintraege | selectattr('type', 'eq', art) | list %}{% endif %}
+      {% for e in eintraege %}
+      - **{{ strptime(e.date, '%Y-%m-%d').strftime('%d.%m.%Y') }} · {{ e.type }}**{{ ' · ' ~ e.subject if e.subject else '' }}{{ ': ' ~ e.text if e.text else '' }}
+      {% else %}
+      Keine Einträge
+      {% endfor %}
+```
+
+Bei mehreren Kindern die Markdown-Karte pro Kind einmal einfügen.
 
 ## 📝 Beispiel Lovelace-Karte
 

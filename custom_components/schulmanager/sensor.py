@@ -24,6 +24,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from . import grading
+from .classbook import flatten_entries
 from .const import DOMAIN, OPT_SCHEDULE_HIGHLIGHT, VERSION
 from .coordinator import SchulmanagerCoordinator
 from .lesson_info import extract_original_info, extract_primary_info, normalize_hour
@@ -135,6 +136,10 @@ async def async_setup_entry(
 
         # Add Wochenplan JSON sensor (for Stundenplan Card integration)
         entities.append(WochenplanJsonSensor(client, coord, sid, name, slug))
+
+        # Only present if enabled and the school offers the module
+        if data is not None and sid in data.get("classbook", {}):
+            entities.append(ClassbookSensor(coord, sid, name))
 
     # Account-level data is only present if enabled and the school offers the module
     if data is not None and "letters_unread" in data:
@@ -1931,6 +1936,71 @@ def _plain_text(value: Any, limit: int = 800) -> str:
     text = re.sub(r"<[^>]+>", " ", str(value or ""))
     text = re.sub(r"\s+", " ", unescape(text)).strip()
     return text[:limit]
+
+
+class ClassbookSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
+    """Number of a student's class book entries in the current term, with details."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "classbook_entries"
+    _attr_icon = "mdi:book-alert-outline"
+    # Also keeps the counter's state changes out of the logbook
+    _attr_native_unit_of_measurement = "Einträge"
+    # Entry texts must not end up in the recorder database through this sensor
+    _unrecorded_attributes = frozenset({"entries"})
+
+    def __init__(
+        self, coordinator: SchulmanagerCoordinator, student_id: str, student_name: str
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self.student_id = student_id
+        self.student_name = student_name
+        entry_id = coordinator.config_entry.entry_id
+        self._attr_unique_id = (
+            f"schulmanager_{entry_id}_{student_id}_classbook_entries"
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"student_{self.student_id}")},
+            name=self.student_name,
+            manufacturer="Schulmanager Online",
+            model="Schüler",
+            suggested_area="Schule",
+            configuration_url="https://login.schulmanager-online.de/",
+        )
+
+    def _entry_types(self) -> list[dict[str, Any]] | None:
+        data = cast(IntegrationData | None, self.coordinator.data)
+        return data.get("classbook", {}).get(self.student_id) if data else None
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return (
+            bool(self.coordinator.last_update_success)
+            and self._entry_types() is not None
+        )
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the number of entries."""
+        return len(flatten_entries(self._entry_types() or []))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return the entries and their number per entry type."""
+        entry_types = self._entry_types() or []
+        return {
+            "counts": {
+                entry_type.get("name"): len(entry_type.get("entries") or [])
+                for entry_type in entry_types
+            },
+            "entries": flatten_entries(entry_types),
+        }
 
 
 class UnreadLettersSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):

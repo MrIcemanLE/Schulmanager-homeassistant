@@ -713,6 +713,27 @@ class SchulmanagerClient:
         await self._dump(f"hausaufgaben_{student_id}.json", data)
         return data if isinstance(data, list) else []
 
+    async def fetch_classbook_entries(
+        self, student_id: str, class_id: int | None
+    ) -> list[dict[str, Any]]:
+        """Fetch a student's class book entries of the current term, grouped by type.
+
+        Same call as "Berichte > Einträge" in the web app; entries have no read state.
+        """
+        if class_id is None:
+            raise RuntimeError("Student has no class")
+        term_id = await self._discover_term_id(class_id, self._bundle_version)
+        if term_id is None:
+            raise RuntimeError("Could not discover the current term")
+        data = await self._api_call(
+            "classbook",
+            "get-entry-statistics",
+            {"student": {"id": int(student_id)}, "termId": term_id},
+            f"classbook_{student_id}",
+            optional_module=True,
+        )
+        return data if isinstance(data, list) else []
+
     @staticmethod
     def _convert_calendar_event_to_exam(event: dict[str, Any]) -> dict[str, Any] | None:
         """Convert a school-wide calendar event (real UTC timestamps) into exam-shaped data.
@@ -1976,6 +1997,7 @@ class SchulmanagerClient:
                 "grades": True,
                 "letters": True,
                 "messages": True,
+                "classbook": False,
             }
 
         result: dict[str, Any] = {
@@ -2062,6 +2084,23 @@ class SchulmanagerClient:
                     result["grades"][sid] = {"subjects": {}}
             else:
                 result["grades"][sid] = {"subjects": {}}
+
+            # Key stays absent on failure so the sensor becomes unavailable
+            if (
+                enabled_features.get("classbook", False)
+                and "classbook" not in self._unavailable_modules
+            ):
+                try:
+                    result.setdefault("classbook", {})[sid] = (
+                        await self.fetch_classbook_entries(sid, cid)
+                    )
+                except ModuleUnavailableError:
+                    _LOGGER.info("Schulmanager: class book not available, skipping")
+                    self._unavailable_modules.add("classbook")
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Schulmanager: class book fetch failed for %s: %s", sid, err
+                    )
 
         # Account-level data (not per student)
         # Keys stay absent on failure so the sensors become unavailable
@@ -2551,6 +2590,8 @@ class SchulmanagerHubClient:
             for key in ["homework", "schedule", "exams", "grades"]:
                 if key in client_result:
                     result[key].update(client_result[key])
+            if "classbook" in client_result:
+                result.setdefault("classbook", {}).update(client_result["classbook"])
 
             # Merge account-level data (letters/messages) across schools
             if "letters_unread" in client_result:

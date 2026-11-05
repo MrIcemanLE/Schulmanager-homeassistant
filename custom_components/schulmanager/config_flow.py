@@ -28,6 +28,7 @@ from .const import (
     DOMAIN,
     MAX_REFRESH_COOLDOWN,
     MIN_REFRESH_COOLDOWN,
+    OPT_ENABLE_CLASSBOOK,
     OPT_ENABLE_EXAMS,
     OPT_ENABLE_GRADES,
     OPT_ENABLE_HOMEWORK,
@@ -344,6 +345,12 @@ class SchulmanagerOptionsFlowHandler(OptionsFlow):
                     OPT_ENABLE_MESSAGES,
                     default=opts.get(
                         OPT_ENABLE_MESSAGES, DEFAULT_OPTIONS[OPT_ENABLE_MESSAGES]
+                    ),
+                ): cv.boolean,
+                vol.Required(
+                    OPT_ENABLE_CLASSBOOK,
+                    default=opts.get(
+                        OPT_ENABLE_CLASSBOOK, DEFAULT_OPTIONS[OPT_ENABLE_CLASSBOOK]
                     ),
                 ): cv.boolean,
                 vol.Required(

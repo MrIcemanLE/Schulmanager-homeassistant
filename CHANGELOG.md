@@ -1,5 +1,26 @@
 # Schulmanager Integration – Changelog
 
+## 0.14.0b1 (2026-11-05) – Beta
+
+**Kurz gesagt:** Testversion mit Klassenbucheinträgen als Kalender und Zähler, dazu ein Ereignis und ein Logbucheintrag bei neuen Einträgen, etwa für Benachrichtigungen. Die Funktion ist ab Werk aus und lässt sich in den Optionen einschalten.
+
+### 🧪 Neu (Beta)
+
+- **Klassenbucheinträge (Danke an @Crajs20, Issue #20):** Die neue Option **Klassenbucheinträge abrufen** holt die Einträge, die Eltern im Portal unter **Berichte → Einträge** sehen. Dafür muss die Schule sie für Eltern freigeben.
+  - **Kalender** `Klassenbuch` pro Kind: jeder Eintrag als ganztägiger Termin.
+  - **Sensor** `Klassenbuch` pro Kind: Anzahl der Einträge, aufgeschlüsselt nach Eintragsart. Das Attribut `entries` enthält alle Einträge, damit lässt sich eine filterbare Liste fürs Dashboard bauen.
+  - **Ereignis** `schulmanager_classbook_new` bei jedem neuen Eintrag, mit Text, Art, Fach, Lehrkraft und Datum. Auch Einträge, die entstanden sind, während Home Assistant aus war, werden gemeldet.
+  - **Logbucheintrag** bei jedem neuen Eintrag.
+  - Beispiele für Benachrichtigung, Logbuch-Karte und Dashboard stehen in der [README](https://github.com/MrIcemanLE/Schulmanager-homeassistant#-klassenbuch).
+- Die Option ist ab Werk aus, weil die Texte sensibel sein können und für alle Benutzer deiner Home-Assistant-Installation sichtbar sind.
+
+### ℹ️ Gut zu wissen
+
+- Das Portal vergibt keine Kennung für Einträge. Ändert eine Lehrkraft einen Eintrag nachträglich, zählt er als neu und löst das Ereignis noch einmal aus.
+- Getestet mit einer Schule, die die Einträge freigibt. Wie sich die Funktion ohne Freigabe verhält, ist noch offen. Rückmeldungen dazu sind willkommen.
+
+---
+
 ## 0.13.0 (2026-11-04)
 
 **Kurz gesagt:** Schulmanager-Konten mit Zwei-Faktor-Anmeldung funktionieren jetzt. Neu ist außerdem die Aktion `schulmanager.get_schedule`, die den Stundenplan strukturiert für Karten wie die Stundenplan Suite liefert, und am Wochenende wird eine Woche mehr Stundenplan geladen.

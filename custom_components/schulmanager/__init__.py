@@ -40,11 +40,14 @@ from .api_client import (
     SchulmanagerHubClient,
     SchulmanagerTwoFactorRequiredError,
 )
+from .classbook import classbook_store
 from .const import (
+    DEFAULT_ENABLE_CLASSBOOK,
     CONF_PASSWORD,
     CONF_USER_DEVICES,
     CONF_USERNAME,
     DOMAIN,
+    OPT_ENABLE_CLASSBOOK,
     OPT_ENABLE_EXAMS,
     OPT_ENABLE_GRADES,
     OPT_ENABLE_HOMEWORK,
@@ -318,9 +321,11 @@ def platforms_for_options(options: Mapping[str, Any]) -> list[Platform]:
             OPT_ENABLE_MESSAGES,
         )
     }
+    classbook = bool(options.get(OPT_ENABLE_CLASSBOOK, DEFAULT_ENABLE_CLASSBOOK))
     platforms = []
     if (
-        enabled[OPT_ENABLE_SCHEDULE]
+        classbook
+        or enabled[OPT_ENABLE_SCHEDULE]
         or enabled[OPT_ENABLE_EXAMS]
         or enabled[OPT_ENABLE_GRADES]
         or enabled[OPT_ENABLE_LETTERS]
@@ -329,7 +334,7 @@ def platforms_for_options(options: Mapping[str, Any]) -> list[Platform]:
         platforms.append(Platform.SENSOR)
     if enabled[OPT_ENABLE_HOMEWORK]:
         platforms.append(Platform.TODO)
-    if enabled[OPT_ENABLE_EXAMS] or enabled[OPT_ENABLE_SCHEDULE]:
+    if classbook or enabled[OPT_ENABLE_EXAMS] or enabled[OPT_ENABLE_SCHEDULE]:
         platforms.append(Platform.CALENDAR)
     # Always loaded for the manual refresh button
     platforms.append(Platform.BUTTON)
@@ -498,7 +503,8 @@ def _async_update_rejected_schools_issue(
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the remembered 2FA devices from the Schulmanager accounts."""
+    """Remove the stored data and the remembered 2FA devices from the accounts."""
+    await classbook_store(hass, entry.entry_id).async_remove()
     for device in entry.data.get(CONF_USER_DEVICES, []):
         client = SchulmanagerClient(
             hass,

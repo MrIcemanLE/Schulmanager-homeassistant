@@ -36,6 +36,9 @@
       "letters_unread": {
         "name": "Unread parent letters"
       },
+      "classbook_entries": {
+        "name": "Class book"
+      },
       "messages_unread": {
         "name": "Unread messages"
       }
@@ -114,6 +117,7 @@
           "enable_grades": "Fetch grades",
           "enable_letters": "Fetch unread parent letters",
           "enable_messages": "Fetch unread messages",
+          "enable_classbook": "Fetch class book entries",
           "range_past_days": "Days in the past",
           "range_future_days": "Days in the future",
           "refresh_cooldown": "Manual refresh cooldown (minutes, 5-30)",
@@ -123,7 +127,8 @@
         },
         "data_description": {
           "enable_letters": "Number and titles of unread parent letters. Letters are not opened, so they stay unread in the app.",
-          "enable_messages": "Number of unread messages and affected conversations. Message texts are not loaded, so no read receipts are sent."
+          "enable_messages": "Number of unread messages and affected conversations. Message texts are not loaded, so no read receipts are sent.",
+          "enable_classbook": "Calendar, counter and an event with logbook entry for new entries. The texts can be sensitive and are visible to every Home Assistant user."
         }
       }
     }
