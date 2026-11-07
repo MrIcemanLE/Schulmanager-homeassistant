@@ -107,8 +107,8 @@ def calculate_average(
     """Weighted average across all counted grades, rounded to one decimal place.
 
     Entries explicitly marked `counts_toward_average=False` (Tendenz entries
-    derived from finalGrades, or grades superseded by a repeat exam of the
-    same type) are excluded.
+    derived from finalGrades) are excluded. A repeat exam counts like any other
+    grade and replaces nothing, as in the Schulmanager web app.
 
     The remaining entries are weighted in two steps, matching how schools
     themselves compute the grade: each entry's own `weighting` (e.g. an exam

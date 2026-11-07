@@ -1,5 +1,22 @@
 # Schulmanager Integration – Changelog
 
+## 0.13.1 (2026-11-07)
+
+**Kurz gesagt:** Noten, die eine Lehrkraft nur für ein einzelnes Kind einträgt, zum Beispiel für eine nachgeholte Leistung, fehlten bisher. Jetzt sind sie da, und die Durchschnitte stimmen mit der Schulmanager-App überein.
+
+### 🐛 Bugfixes
+
+- **Fehlende Einzelnoten (Danke an @larsp123, Issue #21):** Trägt eine Lehrkraft eine Note nur für ein Kind ein statt für die ganze Klasse, etwa für eine nachgeholte Leistung oder als Zusatznote, fehlte sie in den Notensensoren und im Durchschnitt. Jetzt zählt sie mit.
+- **Nachgeschriebene Arbeiten:** Eine Note, die in der Schulmanager-App mit „n“ für „nachgeschrieben“ markiert ist, hat bisher alle anderen Noten derselben Art im Fach aus dem Durchschnitt genommen. Jetzt zählt sie wie in der App ganz normal mit.
+
+### ℹ️ Gut zu wissen
+
+- Durchschnitte können sich nach dem Update ändern.
+- Für Noten, die es schon vor dem Update gab, kommt kein Ereignis `schulmanager_grade_new` und damit keine Benachrichtigung.
+- Wer die Beta 0.14.0b1 nutzt, bekommt diese Korrektur mit der nächsten Version aus der 0.14-Reihe.
+
+---
+
 ## 0.13.0 (2026-11-04)
 
 **Kurz gesagt:** Schulmanager-Konten mit Zwei-Faktor-Anmeldung funktionieren jetzt. Neu ist außerdem die Aktion `schulmanager.get_schedule`, die den Stundenplan strukturiert für Karten wie die Stundenplan Suite liefert, und am Wochenende wird eine Woche mehr Stundenplan geladen.
