@@ -1727,14 +1727,8 @@ class SchulmanagerClient:
         course_block_weighting: dict[int, dict[int, float]],
         block_names: dict[int, str],
         ensure_subject: Callable[[int, int], dict[str, Any]],
-    ) -> dict[tuple[int, int], list[dict[str, Any]]]:
-        """Process gradingEvents (actual grades) into each subject's grade categories.
-
-        Returns the (courseId, gradeTypeId) -> entries groups, used afterwards
-        to apply repeat-exam overrides across the exact same exam slot.
-        """
-        repeat_groups: dict[tuple[int, int], list[dict[str, Any]]] = {}
-
+    ) -> None:
+        """Process gradingEvents (actual grades) into each subject's grade categories."""
         for event in grading_events:
             course_id = event.get("courseId")
             if course_id not in course_map:
@@ -1784,26 +1778,21 @@ class SchulmanagerClient:
                     subject["grades"][category_name] = []
                 subject["grades"][category_name].append(grade_entry)
 
-                if isinstance(grade_type_id, int):
-                    repeat_groups.setdefault((course_id, grade_type_id), []).append(grade_entry)
-
-        return repeat_groups
-
     @staticmethod
-    def _apply_repeat_exam_overrides(
-        repeat_groups: dict[tuple[int, int], list[dict[str, Any]]],
-    ) -> None:
-        """A repeat exam (isRepeatExam=True) replaces the grade(s) it retakes.
+    def _individual_grades_as_events(
+        grades_data: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Wrap grades entered for one student without a class-wide event as gradingEvents.
 
-        Excludes the non-repeat entries of the same exam slot from the
-        average (mutates them in place), but keeps them visible for
-        transparency.
+        Such an entry carries the event fields (date, weighting, ...) itself.
+        The API misspells the key as "indiviualGrades".
         """
-        for group in repeat_groups.values():
-            if any(entry["is_repeat_exam"] for entry in group):
-                for entry in group:
-                    if not entry["is_repeat_exam"]:
-                        entry["counts_toward_average"] = False
+        individual_grades: list[dict[str, Any]] = (
+            grades_data.get("indiviualGrades")
+            or grades_data.get("individualGrades")
+            or []
+        )
+        return [{**grade, "grades": [grade]} for grade in individual_grades]
 
     def _process_final_grades(
         self,
@@ -1857,7 +1846,10 @@ class SchulmanagerClient:
     async def _process_grades_data(self, grades_data: dict) -> GradesPayload:
         """Process raw grades data into structured format by subject."""
         courses: list[dict[str, Any]] = grades_data.get("courses", [])
-        grading_events: list[dict[str, Any]] = grades_data.get("gradingEvents", [])
+        grading_events: list[dict[str, Any]] = [
+            *grades_data.get("gradingEvents", []),
+            *self._individual_grades_as_events(grades_data),
+        ]
         final_grades: list[dict[str, Any]] = grades_data.get("finalGrades", [])
         type_presets: list[dict[str, Any]] = grades_data.get("typePresets", [])
         block_presets: list[dict[str, Any]] = grades_data.get("blockPresets", [])
@@ -1917,10 +1909,9 @@ class SchulmanagerClient:
                 }
             return subjects[subject_id]
 
-        repeat_groups = self._process_grading_events(
+        self._process_grading_events(
             grading_events, course_map, type_map, course_block_weighting, block_names, ensure_subject
         )
-        self._apply_repeat_exam_overrides(repeat_groups)
         self._process_final_grades(final_grades, course_map, ensure_subject)
 
         # Calculate averages for each subject
