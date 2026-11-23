@@ -1251,6 +1251,7 @@ class SchulmanagerClient:
                 "date": lesson.get("date", ""),
                 "original_subject": "",
                 "new_subject": "",
+                "subject_label": "",
                 "original_teacher": "",
                 "new_teacher": "",
                 "original_room": "",
@@ -1262,6 +1263,10 @@ class SchulmanagerClient:
             # Same lookup as the schedule sensors, for every change type
             original = extract_original_info(lesson)
             change_info["original_subject"] = original["subject"]
+            change_info["subject_label"] = (
+                original["subject_label"]
+                or (actual_lesson.get("subjectLabel") or "").strip()
+            )
             change_info["original_teacher"] = original["teacher"]
             change_info["original_room"] = original["room"]
 

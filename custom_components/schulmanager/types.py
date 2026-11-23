@@ -13,6 +13,7 @@ class ScheduleChange(TypedDict, total=False):
     type: str
     new_subject: str
     original_subject: str
+    subject_label: str
     new_teacher: str
     original_teacher: str
     new_room: str
