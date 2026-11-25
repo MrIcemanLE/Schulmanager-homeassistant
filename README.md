@@ -92,7 +92,7 @@ Die Integration legt pro Schüler ein Gerät an, dazu das Gerät „Schulmanager
 - `sensor.<schüler>_tage_bis_nachste_arbeit` – Tage bis zur nächsten Arbeit
 - `sensor.<schüler>_noten_<fachkürzel>` – Noten pro Fach (z. B. `noten_ma`, `noten_de`)
 - `sensor.<schüler>_noten_gesamt` – Gesamtdurchschnitt
-- `sensor.<schüler>_klassenbuch` – Anzahl der Klassenbucheinträge im laufenden Schuljahr bzw. Halbjahr (nur wenn aktiviert)
+- `sensor.<schüler>_klassenbuch` – Anzahl der Klassenbucheinträge im laufenden Schuljahr (nur wenn aktiviert)
 - `sensor.<schüler>_schule` – Schulname (Diagnose)
 - `sensor.<schüler>_schul_id` – Schul-ID (Diagnose)
 
@@ -223,11 +223,13 @@ response_variable: stundenplan
 
 Pro Kind enthält die Antwort einen `status` (`ok`, `stale` = letzter Abruf fehlgeschlagen, ältere Daten, `unavailable` = noch keine Daten), den abgerufenen Zeitraum, die Stundenzeiten und für jeden Tag die Stunden mit Fach, Kurs bzw. Gruppe, Lehrkräften, Räumen und Änderungen. Liefert die Schule mehrere Kurse in derselben Stunde, erscheint jeder Kurs einzeln.
 
+Neben Fachkürzel (`subject`) und Fachname (`subject_full`) enthält jede Stunde die Bezeichnung, die die Schule für den Kurs vergibt (`subject_label`, z. B. „WU Klettern“ statt „Sport (mw)“). Ohne Bezeichnung ist das Feld leer. Dieselbe Angabe steht im Attribut `raw` der Stundenplan-Sensoren, in den Stundenplanänderungen und als `current_subject_label` im Sensor „Aktuelle Stunde“.
+
 Sobald sich der Stundenplan eines Kindes ändert, löst die Integration das Ereignis `schulmanager_schedule_updated` aus (mit `config_entry_id` und `student_ids`).
 
 ## 📒 Klassenbuch
 
-Zeigt die Einträge, die Eltern im Portal unter **Berichte → Einträge** sehen. Dafür muss die Schule sie für Eltern freigeben. Verfügbar ab Version 0.14.0b1. Die Funktion ist ab Werk aus und lässt sich in den Optionen der Integration mit **Klassenbucheinträge abrufen** einschalten.
+Zeigt die Einträge, die Eltern im Portal unter **Berichte → Einträge** sehen. Dafür muss die Schule sie für Eltern freigeben. Verfügbar ab Version 0.14.0. Die Funktion ist ab Werk aus und lässt sich in den Optionen der Integration mit **Klassenbucheinträge abrufen** einschalten.
 
 > **Datenschutz:** Die Texte können sensibel sein (etwa bei Fehlverhalten) und sind für alle Benutzer deiner Home-Assistant-Installation sichtbar. Ereignisse und Logbucheinträge samt Text landen in der Verlaufsdatenbank, das Attribut `entries` des Sensors nicht. Diagnose-Downloads enthalten weder die Texte noch die Namen der Lehrkräfte.
 
@@ -264,7 +266,7 @@ Das Logbuch enthält nur Einträge, die seit dem Einschalten neu dazugekommen si
 
 ### Übersicht mit Filter fürs Dashboard
 
-Das Attribut `entries` des Sensors enthält alle Einträge des laufenden Schuljahres bzw. Halbjahres (das legt das Portal fest), das Attribut `counts` die Anzahl je Eintragsart. Damit lässt sich eine filterbare Liste bauen:
+Das Attribut `entries` des Sensors enthält alle Einträge des laufenden Schuljahres, das Attribut `counts` die Anzahl je Eintragsart. Damit lässt sich eine filterbare Liste bauen:
 
 1. Unter **Einstellungen → Geräte & Dienste → Helfer** einen Helfer vom Typ **Dropdown** mit dem Namen `Klassenbuch Art` anlegen. Als Optionen `Alle` und die Eintragsarten deiner Schule eintragen. Die Namen stehen im Attribut `counts`.
 2. Diese Karte ins Dashboard einfügen und die Sensor-ID anpassen:
