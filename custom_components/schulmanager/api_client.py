@@ -619,26 +619,19 @@ class SchulmanagerClient:
 
             results = data.get("results") or []
             if not results:
-                _LOGGER.warning(
-                    "No results in API response for %s/%s", module, endpoint
-                )
-                return []
+                raise RuntimeError(f"/api/calls {module}/{endpoint}: no results")
 
             result = results[0]
 
-            # Check if the individual request failed (status 500, etc.)
+            # Raise instead of returning [], so a failure is not mistaken for no data
             if isinstance(result, dict) and "status" in result:
                 if result["status"] == 403 and optional_module:
                     raise ModuleUnavailableError(f"{module}/{endpoint}")
                 if result["status"] != 200:
-                    _LOGGER.warning(
-                        "API request failed: %s/%s -> status %s, id: %s",
-                        module,
-                        endpoint,
-                        result.get("status"),
-                        result.get("id"),
+                    raise RuntimeError(
+                        f"/api/calls {module}/{endpoint} -> request status "
+                        f"{result['status']}"
                     )
-                    return []
 
             return (
                 result.get("data", [])
@@ -912,8 +905,7 @@ class SchulmanagerClient:
 
         async with sess.post(CALLS_URL, json=batch_payload, headers=headers) as resp:
             if resp.status != 200:
-                _LOGGER.error("Exams API call failed with status %s", resp.status)
-                return []
+                raise RuntimeError(f"Exams API call failed with status {resp.status}")
 
             response_data = await resp.json()
             await self._dump(f"exams_response_{student_id}.json", {
@@ -923,6 +915,9 @@ class SchulmanagerClient:
 
             # Parse both responses
             results = response_data.get("results", [])
+            exams_status = results[0].get("status") if results else None
+            if exams_status != 200:
+                raise RuntimeError(f"exams/get-exams -> request status {exams_status}")
             all_exams = []
 
             # Result 0: Regular exams from get-exams
@@ -1040,6 +1035,14 @@ class SchulmanagerClient:
                 "status": resp.status,
                 "data": response_data
             })
+
+            # The lessons are the first request; without them the week would look empty
+            results = response_data.get("results") or []
+            lessons_status = results[0].get("status") if results else None
+            if lessons_status != 200:
+                raise RuntimeError(
+                    f"schedules/get-actual-lessons -> request status {lessons_status}"
+                )
 
             payload = self._parse_batch_schedule_response(response_data, today)
             # Marks a successful fetch; failed fetches yield a payload without it
@@ -1565,14 +1568,18 @@ class SchulmanagerClient:
 
         async with sess.post(CALLS_URL, json=grades_payload, headers=headers) as response:
             if response.status != 200:
-                _LOGGER.error("Grades fetch failed with status %d", response.status)
-                return None
+                raise RuntimeError(f"Grades fetch failed with status {response.status}")
 
             response_data = await response.json()
             await self._dump(f"grades_response_{student_id}.json", response_data)
 
             for result in response_data.get("results", []):
-                if result.get("status") == 200 and "data" in result:
+                if result.get("status") != 200:
+                    raise RuntimeError(
+                        f"grades/get-grading-information-for-student -> request "
+                        f"status {result.get('status')}"
+                    )
+                if "data" in result:
                     return cast(dict[str, Any], result["data"])
 
             _LOGGER.debug("No grades found for student %s", student_id)
@@ -2004,49 +2011,36 @@ class SchulmanagerClient:
             "grades": {},
         }
 
-        # Fetch per student only for enabled features
+        try:
+            weeks = int((date_range_config or {}).get("schedule_weeks", 2))
+        except (TypeError, ValueError):
+            weeks = 2
+
+        # Disabled features get empty data. A failed fetch leaves the student's key
+        # out instead, so its entities become unavailable rather than show "no data".
         for st in self._students:
             sid = st["id"]
             cid = st.get("classId")
 
-            # Only fetch homework if enabled
             if enabled_features.get("homework", True):
                 try:
-                    hw = await self.fetch_homework(sid)
-                    result["homework"][sid] = hw
+                    result["homework"][sid] = await self.fetch_homework(sid)
                 except Exception as err:
                     _LOGGER.warning(
                         "Schulmanager: homework fetch failed for %s: %s", sid, err
                     )
-                    result["homework"][sid] = []
             else:
                 result["homework"][sid] = []
 
-            # Only fetch schedule if enabled
             if enabled_features.get("schedule", True):
                 try:
-                    # Use weeks parameter if provided via date_range_config under key 'schedule_weeks'
-                    weeks = 2
-                    try:
-                        weeks = int((date_range_config or {}).get("schedule_weeks", 2))
-                    except Exception:
-                        weeks = 2
-                    sch = await self.fetch_schedule_today_tomorrow(sid, cid, weeks)
-                    result["schedule"][sid] = sch
+                    result["schedule"][sid] = await self.fetch_schedule_today_tomorrow(
+                        sid, cid, weeks
+                    )
                 except Exception as err:
                     _LOGGER.warning(
                         "Schulmanager: schedule fetch failed for %s: %s", sid, err
                     )
-                    result["schedule"][sid] = {
-                        "today": [],
-                        "tomorrow": [],
-                        "week": {},
-                        "changes": {
-                            "today": [],
-                            "tomorrow": [],
-                            "summary": "Keine Stundenplanänderungen für heute und morgen",
-                        },
-                    }
             else:
                 result["schedule"][sid] = {
                     "today": [],
@@ -2059,25 +2053,21 @@ class SchulmanagerClient:
                     },
                 }
 
-            # Only fetch exams if enabled
             if enabled_features.get("exams", True):
                 try:
-                    ex = await self.fetch_exams(sid, cid, date_range_config)
-                    result["exams"][sid] = ex
+                    result["exams"][sid] = await self.fetch_exams(
+                        sid, cid, date_range_config
+                    )
                 except Exception as err:
                     _LOGGER.warning("Schulmanager: exams fetch failed for %s: %s", sid, err)
-                    result["exams"][sid] = []
             else:
                 result["exams"][sid] = []
 
-            # Only fetch grades if enabled
             if enabled_features.get("grades", True):
                 try:
-                    grades = await self.fetch_grades(sid, cid)
-                    result["grades"][sid] = grades
+                    result["grades"][sid] = await self.fetch_grades(sid, cid)
                 except Exception as err:
                     _LOGGER.warning("Schulmanager: grades fetch failed for %s: %s", sid, err)
-                    result["grades"][sid] = {"subjects": {}}
             else:
                 result["grades"][sid] = {"subjects": {}}
 
@@ -2574,12 +2564,19 @@ class SchulmanagerHubClient:
 
         # Aggregate results from all schools
         self.two_factor_schools = []
+        errors: list[BaseException] = []
         for school_key, client_result in zip(self._clients, client_results, strict=True):
             if isinstance(client_result, SchulmanagerTwoFactorRequiredError):
                 # The remembered device expired or was removed, or 2FA was switched on
                 self.two_factor_schools.append(self.get_school_name(school_key))
             if isinstance(client_result, BaseException):
-                _LOGGER.error("Failed to update school data: %s", client_result)
+                # The students of this school stay out of the result: unavailable
+                _LOGGER.warning(
+                    "Failed to update data of school '%s': %s",
+                    self.get_school_name(school_key),
+                    client_result,
+                )
+                errors.append(client_result)
                 continue
 
             # Merge student data from this school
@@ -2601,6 +2598,16 @@ class SchulmanagerHubClient:
                 result["messages_unread_count"] = result.get(
                     "messages_unread_count", 0
                 ) + client_result.get("messages_unread_count", 0)
+
+        if len(errors) == len(client_results):
+            # Nothing was fetched: let the coordinator fail, a rejected password first
+            for error in errors:
+                if isinstance(error, SchulmanagerAuthError):
+                    raise error
+            for error in errors:
+                if isinstance(error, SchulmanagerTwoFactorRequiredError):
+                    raise error
+            raise errors[0]
 
         return result
 

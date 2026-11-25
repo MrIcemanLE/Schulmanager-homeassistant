@@ -52,8 +52,8 @@ async def async_get_config_entry_diagnostics(
             "data": coordinator_data,
         },
         "service": {
-            "has_token": bool(getattr(client, "_token", None)),
-            "has_bundle_version": bool(getattr(client, "_bundle_version", None)),
+            "has_token": client.has_token() if client else False,
+            "has_bundle_version": client.has_bundle_version() if client else False,
             "student_count": len(client.get_all_students()) if client else 0,
         },
     }

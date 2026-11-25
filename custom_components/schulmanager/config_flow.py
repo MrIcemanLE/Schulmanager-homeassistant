@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -13,6 +14,7 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
+from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
 from .api_client import (
@@ -149,13 +151,10 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
             errors={"base": "unknown"},
         )
 
-    # Reauthentication support
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
         """Start reauthentication step for updating credentials."""
-        entry_id = self.context.get("entry_id")
-        if not isinstance(entry_id, str):
-            return self.async_abort(reason="reauth_successful")
-        self._reauth_entry = self.hass.config_entries.async_get_entry(entry_id)
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -163,86 +162,71 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Confirm reauthentication with new credentials and update entry."""
         errors: dict[str, str] = {}
+        reauth_entry = self._get_reauth_entry()
 
-        if user_input is None:
-            # Ask for updated credentials
-            return self.async_show_form(
-                step_id="reauth_confirm",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required(CONF_USERNAME): cv.string,
-                        vol.Required(CONF_PASSWORD): cv.string,
-                    }
-                ),
-            )
-
-        # Validate new credentials
-        try:
-            # Reuse existing schools/institutionId from the stored entry if available
-            existing_schools = None
-            existing_inst_id = None
-            existing_devices = None
-            if hasattr(self, "_reauth_entry") and self._reauth_entry:
-                existing_schools = self._reauth_entry.data.get("schools")
-                existing_inst_id = self._reauth_entry.data.get("institution_id")
-                existing_devices = self._reauth_entry.data.get(CONF_USER_DEVICES)
+        if user_input is not None:
+            if reauth_entry.unique_id is not None:
+                # Another login would silently turn this entry into another account
+                await self.async_set_unique_id(user_input[CONF_USERNAME].lower())
+                self._abort_if_unique_id_mismatch(reason="wrong_account")
 
             hub = SchulmanagerHubClient(
                 self.hass,
                 user_input[CONF_USERNAME],
                 user_input[CONF_PASSWORD],
-                user_devices=existing_devices,
+                user_devices=reauth_entry.data.get(CONF_USER_DEVICES),
             )
             try:
                 await hub.async_login(
-                    schools=existing_schools,
-                    institution_id=existing_inst_id,
+                    schools=reauth_entry.data.get("schools"),
+                    institution_id=reauth_entry.data.get("institution_id"),
                 )
             except SchulmanagerTwoFactorRequiredError:
                 return await self._async_start_two_factor(hub, user_input)
-            if hub.get_two_factor_pending():
-                return await self._async_start_two_factor(hub, user_input)
-            if not hub.has_token():
-                raise RuntimeError("Login succeeded but no token returned")
-        except Exception:  # noqa: BLE001 - config flows intentionally swallow unknown errors to prompt retry
-            errors["base"] = "invalid_auth"
-            return self.async_show_form(
-                step_id="reauth_confirm",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required(CONF_USERNAME, default=user_input.get(CONF_USERNAME, "")): cv.string,
-                        vol.Required(CONF_PASSWORD): cv.string,
-                    }
-                ),
-                errors=errors,
-            )
+            except SchulmanagerAuthError:
+                errors["base"] = "invalid_auth"
+            except Exception:
+                _LOGGER.exception("Reauthentication with Schulmanager failed")
+                errors["base"] = "cannot_connect"
+            else:
+                if hub.get_two_factor_pending():
+                    return await self._async_start_two_factor(hub, user_input)
+                if hub.has_token():
+                    return self._async_finish_reauth(user_input, hub)
+                # Stored schools are logged into one by one and do not raise
+                failed = hub.get_failed_schools()
+                errors["base"] = (
+                    "invalid_auth"
+                    if any(school["reason"] == "password" for school in failed)
+                    else "cannot_connect"
+                )
 
-        return await self._async_finish_reauth(user_input, hub)
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=self.add_suggested_values_to_schema(
+                USER_SCHEMA,
+                {CONF_USERNAME: (user_input or reauth_entry.data)[CONF_USERNAME]},
+            ),
+            errors=errors,
+        )
 
-    async def _async_finish_reauth(
+    @callback
+    def _async_finish_reauth(
         self, credentials: dict[str, Any], hub: SchulmanagerHubClient
     ) -> ConfigFlowResult:
         """Store the new credentials and devices and reload the entry."""
-        assert hasattr(self, "_reauth_entry") and self._reauth_entry is not None
-
-        # Preserve existing schools/institutionId
+        reauth_entry = self._get_reauth_entry()
         update_data: dict[str, Any] = {
             CONF_USERNAME: credentials[CONF_USERNAME],
             CONF_PASSWORD: credentials[CONF_PASSWORD],
         }
-        if (existing_schools := self._reauth_entry.data.get("schools")) is not None:
+        if (existing_schools := reauth_entry.data.get("schools")) is not None:
             update_data["schools"] = existing_schools
-        elif (inst_id := self._reauth_entry.data.get("institution_id")) is not None:
+        elif (inst_id := reauth_entry.data.get("institution_id")) is not None:
             update_data["institution_id"] = inst_id
         if devices := hub.get_user_devices():
             update_data[CONF_USER_DEVICES] = devices
-
-        self.hass.config_entries.async_update_entry(
-            self._reauth_entry,
-            data=update_data,
-        )
-        await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
-        return self.async_abort(reason="reauth_successful")
+        return self.async_update_reload_and_abort(reauth_entry, data=update_data)
 
     async def _async_start_two_factor(
         self, hub: SchulmanagerHubClient, credentials: dict[str, Any]
@@ -272,7 +256,7 @@ class SchulmanagerConfigFlow(ConfigFlow, domain=DOMAIN):
                 if self._hub.get_two_factor_pending():
                     return await self.async_step_two_factor()
                 if self.source == SOURCE_REAUTH:
-                    return await self._async_finish_reauth(self._credentials, self._hub)
+                    return self._async_finish_reauth(self._credentials, self._hub)
                 # Log in again, now with the remembered devices
                 self._user_devices = self._hub.get_user_devices()
                 return await self.async_step_user(self._credentials)

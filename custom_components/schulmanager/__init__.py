@@ -16,15 +16,18 @@ from homeassistant.core import (
     ServiceCall,
     ServiceResponse,
     SupportsResponse,
+    callback,
 )
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryError,
     ConfigEntryNotReady,
+    HomeAssistantError,
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.device_registry import (
+    DeviceEntry,
     DeviceEntryType,
     async_get as async_get_device_registry,
 )
@@ -33,6 +36,7 @@ from homeassistant.helpers.entity_registry import (
     async_get as async_get_entity_registry,
 )
 from homeassistant.helpers.service import async_register_admin_service
+from homeassistant.helpers.typing import ConfigType
 
 from .api_client import (
     SchulmanagerAuthError,
@@ -60,10 +64,11 @@ from .coordinator import SchulmanagerCoordinator
 from .privacy import get_logger
 from .repairs import TWO_FACTOR_ISSUE, async_create_two_factor_issue, school_label
 from .schedule_export import SCHEMA_VERSION, STATUS_OK, STATUS_STALE
+from .todo import todo_status_store
 
 _LOGGER = get_logger(__name__)
 
-PLATFORMS = [Platform.SENSOR, Platform.TODO, Platform.CALENDAR, Platform.BUTTON]
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 ATTR_STUDENT_ID = "student_id"
@@ -372,22 +377,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryAuthFailed("Schulmanager rejected the password") from err
     finally:
         _async_store_login_results(hass, entry, client)
-    _async_update_rejected_schools_issue(hass, entry, client)
+
+    # Stored schools are logged into one by one, so their errors do not raise above
+    password_rejected = not client.has_token() and any(
+        school["reason"] == "password" for school in client.get_failed_schools()
+    )
+    _async_update_rejected_schools_issue(
+        hass, entry, client, password_issue=not password_rejected
+    )
+    if password_rejected:
+        raise ConfigEntryAuthFailed("Schulmanager rejected the password")
     if client.get_two_factor_pending() and not client.has_token():
         raise ConfigEntryError("A two-factor code is needed")
+    if not client.has_token():
+        raise ConfigEntryNotReady("Could not log into any school")
 
     coordinator = SchulmanagerCoordinator(hass, client, entry)
+    await coordinator.async_config_entry_first_refresh()
 
-    try:
-        await coordinator.async_config_entry_first_refresh()
-    except Exception as e:
-        _LOGGER.exception("Failed to initialize Schulmanager")
-        raise ConfigEntryNotReady from e
-
-    # Create the main Schulmanager service device
     device_registry = async_get_device_registry(hass)
-
-    # Main service device
     service_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, f"service_{entry.entry_id}")},
@@ -405,7 +413,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     students = client.get_all_students()
 
     for student in students:
-        student_device = device_registry.async_get_or_create(
+        device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, f"student_{student['id']}")},
             name=student["name"],
@@ -415,13 +423,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             configuration_url="https://login.schulmanager-online.de/",
             via_device_id=service_device.id,
         )
-
-        # If device was orphaned, make sure it's properly linked to this config entry
-        if entry.entry_id not in student_device.config_entries:
-            device_registry.async_update_device(
-                student_device.id,
-                add_config_entry_id=entry.entry_id
-            )
 
     _LOGGER.info("Created service device and %d student devices", len(students))
 
@@ -434,17 +435,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "platforms": platforms,
     }
 
-    # Keep minimal mapping for domain-level services bookkeeping
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"entry": entry}
-
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
-
-    # Register services
-    await _async_register_services(hass)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    """Allow removing a student device once the account no longer has the student."""
+    if entry.state is not ConfigEntryState.LOADED:
+        return False
+    current = {
+        f"student_{student['id']}"
+        for student in entry.runtime_data["client"].get_all_students()
+    }
+    return not any(
+        domain == DOMAIN and (ident in current or ident.startswith("service_"))
+        for domain, ident in device_entry.identifiers
+    )
 
 
 def _async_store_login_results(
@@ -476,14 +487,21 @@ def _school_login_issue_id(entry: ConfigEntry, translation_key: str) -> str:
 
 
 def _async_update_rejected_schools_issue(
-    hass: HomeAssistant, entry: ConfigEntry, client: SchulmanagerHubClient
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    client: SchulmanagerHubClient,
+    *,
+    password_issue: bool = True,
 ) -> None:
-    """Raise a repair issue per reason while some schools cannot be logged into."""
+    """Raise a repair issue per reason while some schools cannot be logged into.
+
+    Without password_issue a rejected password is left to the reauth flow.
+    """
     failed = client.get_failed_schools()
     for reason, translation_key in _SCHOOL_LOGIN_ISSUES.items():
         issue_id = _school_login_issue_id(entry, translation_key)
         schools = [school["label"] for school in failed if school["reason"] == reason]
-        if not schools:
+        if not schools or (reason == "password" and not password_issue):
             ir.async_delete_issue(hass, DOMAIN, issue_id)
             continue
         if reason == "two_factor":
@@ -505,6 +523,7 @@ def _async_update_rejected_schools_issue(
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove the stored data and the remembered 2FA devices from the accounts."""
     await classbook_store(hass, entry.entry_id).async_remove()
+    await todo_status_store(hass, entry.entry_id).async_remove()
     for device in entry.data.get(CONF_USER_DEVICES, []):
         client = SchulmanagerClient(
             hass,
@@ -528,40 +547,49 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry, entry.runtime_data["platforms"]
     )
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-        entry.runtime_data = None
         for translation_key in _SCHOOL_LOGIN_ISSUES.values():
             ir.async_delete_issue(
                 hass, DOMAIN, _school_login_issue_id(entry, translation_key)
             )
 
-    # Unregister services if this was the last entry
-    if not hass.data[DOMAIN]:
-        hass.services.async_remove(DOMAIN, "clear_cache")
-        hass.services.async_remove(DOMAIN, "refresh")
-        hass.services.async_remove(DOMAIN, "clear_debug")
-        hass.services.async_remove(DOMAIN, SERVICE_GET_SCHEDULE)
-
     return unload_ok
 
 
-async def _async_register_services(hass: HomeAssistant) -> None:
+def _loaded_entries(hass: HomeAssistant) -> list[ConfigEntry]:
+    return [
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.state is ConfigEntryState.LOADED
+    ]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the Schulmanager actions."""
+    _async_register_services(hass)
+    return True
+
+
+@callback
+def _async_register_services(hass: HomeAssistant) -> None:
     """Register Schulmanager services."""
 
     async def clear_cache_service(_call: ServiceCall) -> None:
         """Clear cache for all Schulmanager instances."""
-        for entry_data in hass.data[DOMAIN].values():
-            entry: ConfigEntry = entry_data["entry"]
-            client = entry.runtime_data["client"]
-            client.clear_auth_cache()
+        for entry in _loaded_entries(hass):
+            entry.runtime_data["client"].clear_auth_cache()
             _LOGGER.info("Cleared service client cache")
 
     async def refresh_service(_call: ServiceCall) -> None:
         """Refresh data for all Schulmanager instances with cooldown enforcement."""
-        for entry_data in hass.data[DOMAIN].values():
-            entry: ConfigEntry = entry_data["entry"]
-            coordinator = entry.runtime_data["coordinator"]
-            await coordinator.async_request_manual_refresh()
+        cooldown_error: HomeAssistantError | None = None
+        for entry in _loaded_entries(hass):
+            try:
+                await entry.runtime_data["coordinator"].async_request_manual_refresh()
+            except HomeAssistantError as err:
+                # Still refresh the other entries
+                cooldown_error = err
+        if cooldown_error is not None:
+            raise cooldown_error
 
     async def clear_debug_service(_call: ServiceCall) -> None:
         """Delete all debug dump files, also those written by older versions."""
@@ -588,11 +616,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
                 )
             entries = [entry]
         else:
-            entries = [
-                entry
-                for entry in hass.config_entries.async_entries(DOMAIN)
-                if entry.state is ConfigEntryState.LOADED
-            ]
+            entries = _loaded_entries(hass)
 
         student_id = call.data.get(ATTR_STUDENT_ID)
         students: list[dict[str, Any]] = []
@@ -615,18 +639,14 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             "students": students,
         }
 
-    # Register services only once
-    if not hass.services.has_service(DOMAIN, "clear_cache"):
-        hass.services.async_register(DOMAIN, "clear_cache", clear_cache_service)
-        hass.services.async_register(DOMAIN, "refresh", refresh_service)
-        # Deletes files, so restricted to administrators
-        async_register_admin_service(
-            hass, DOMAIN, "clear_debug", clear_debug_service
-        )
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_SCHEDULE,
-            get_schedule_service,
-            schema=GET_SCHEDULE_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
+    hass.services.async_register(DOMAIN, "clear_cache", clear_cache_service)
+    hass.services.async_register(DOMAIN, "refresh", refresh_service)
+    # Deletes files, so restricted to administrators
+    async_register_admin_service(hass, DOMAIN, "clear_debug", clear_debug_service)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_SCHEDULE,
+        get_schedule_service,
+        schema=GET_SCHEDULE_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )

@@ -1,5 +1,35 @@
 # Schulmanager Integration – Changelog
 
+## 0.14.1b1 (2026-11-25) – Beta
+
+**Kurz gesagt:** Testversion mit verlässlicherer Fehlerbehandlung. Antwortet Schulmanager einmal nicht, zeigen die Entitäten „Nicht verfügbar“ statt eines leeren Stundenplans oder einer geleerten Hausaufgabenliste. Ein geändertes Passwort meldet Home Assistant jetzt zuverlässig als erneute Anmeldung.
+
+### 🐛 Bugfixes
+
+- **Störung sah aus wie „keine Daten“:** Schlug ein Abruf fehl, zeigten die Stundenplan-Sensoren „Schulfrei“, die Hausaufgabenliste war leer, und Kalender und „Tage bis nächste Arbeit“ zeigten nichts. Jetzt werden nur die betroffenen Entitäten nicht verfügbar, und die Hausaufgabenliste behält Einträge und Häkchen.
+- **Geändertes Passwort:** Home Assistant bittet jetzt um eine erneute Anmeldung. Bisher lieferte die Integration still leere Daten oder versuchte es beim Start endlos neu. Das betraf vor allem Konten mit Kindern an mehreren Schulen und ältere Installationen.
+- **Erneute Anmeldung:** Ein Verbindungsfehler erscheint nicht mehr als „Ungültige Anmeldedaten“. Zugangsdaten eines anderen Schulmanager-Kontos werden abgelehnt, statt den Eintrag unbemerkt umzustellen.
+- **Datum um Mitternacht:** „Wochenende“, „Tage bis nächste Arbeit“ und die Kalenderwoche richten sich jetzt nach der Zeitzone von Home Assistant. In Docker-Installationen ohne eingestellte Zeitzone waren sie bis 1 bzw. 2 Uhr nachts noch auf dem Vortag.
+- **Weniger Anfragen beim Start:** Beim Laden der Integration wurden bisher bis zu zwei zusätzliche komplette Abrufe ausgelöst.
+- **Button „Jetzt aktualisieren“:** Während der Wartezeit zwischen zwei manuellen Abrufen passierte beim Drücken nichts. Jetzt erscheint eine Meldung mit der verbleibenden Zeit.
+- **Diagnose:** zeigt den Anmeldestatus wieder richtig an.
+
+### ✨ Verbesserungen
+
+- **Kalender** aktualisieren sich sofort mit neuen Daten statt bis zu einer Minute später. Der Stundenplan-Kalender hängt jetzt am Gerät des Kindes. Namen und Entity-IDs bleiben gleich.
+- **Aktionen** (`schulmanager.refresh` usw.) sind immer vorhanden und haben übersetzte Namen. `schulmanager.refresh` aktualisiert alle Einträge, auch wenn einer gerade in der Wartezeit ist.
+- **Abgehakte Hausaufgaben** werden pro Integrationseintrag gespeichert und beim Löschen der Integration entfernt. Häkchen von Hausaufgaben, die Schulmanager nicht mehr liefert, werden vergessen. Bestehende Häkchen werden übernommen.
+- **Geräte von Kindern,** die das Konto nicht mehr hat, lassen sich jetzt löschen.
+- **Kleinere Datenbank:** Große Attribute (`raw`, `html`, `plain` der Stundenplan-Sensoren, `plan` des Wochenplans) landen nicht mehr im Verlauf. Live sind sie unverändert da, Karten und Vorlagen funktionieren weiter.
+
+### ℹ️ Gut zu wissen
+
+- Das Attribut `last_updated` an den Noten-, Prüfungs- und Stundenplanänderungs-Sensoren entfällt. Es änderte sich bei jedem Abruf und erzeugte stündlich neue Einträge in der Datenbank. Den Zeitpunkt der letzten Änderung zeigt Home Assistant am Zustand selbst.
+- Voraussetzung ist jetzt Home Assistant 2024.11. Ältere Versionen funktionierten technisch schon seit einiger Zeit nicht mehr.
+- Die README beschreibt jetzt auch, wie man die Integration entfernt.
+
+---
+
 ## 0.14.0 (2026-11-25)
 
 **Kurz gesagt:** Klassenbucheinträge lassen sich jetzt als Kalender und Zähler abrufen, mit Ereignis und Logbucheintrag bei neuen Einträgen. Außerdem zeigt der Stundenplan die Kursbezeichnung der Schule, etwa „WU Klettern“ statt nur „Sport (mw)“.

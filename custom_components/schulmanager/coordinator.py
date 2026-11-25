@@ -4,18 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    HomeAssistantError,
+    ServiceValidationError,
+)
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-if TYPE_CHECKING:
-    from .api_client import SchulmanagerHubClient
-
+from .api_client import SchulmanagerAuthError, SchulmanagerHubClient
 from .classbook import EVENT_CLASSBOOK_NEW, classbook_store, entry_keys, flatten_entries
 from .const import (
     DEFAULT_SCHEDULE_WEEKS,
@@ -111,15 +113,18 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
         )
         try:
             data = await self.client.async_update(enabled_features, date_range_config)
+        except SchulmanagerAuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
         except UpdateFailed:
             raise
         except Exception as err:
             raise UpdateFailed(str(err)) from err
-
-        if self.client.two_factor_schools:
-            async_create_two_factor_issue(
-                self.hass, self.config_entry, self.client.two_factor_schools
-            )
+        finally:
+            # Also when no school could be updated, which then fails the update
+            if self.client.two_factor_schools:
+                async_create_two_factor_issue(
+                    self.hass, self.config_entry, self.client.two_factor_schools
+                )
 
         # Detect new homework/grades after the first successful refresh only
         try:
@@ -340,6 +345,14 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
                         "grade": g,
                     }
 
+    def has_student_data(self, key: str, student_id: str) -> bool:
+        """Return True if the last update fetched this kind of data for the student.
+
+        A failed fetch leaves the student out, so its entities become unavailable.
+        """
+        data = cast(dict[str, Any] | None, self.data) or {}
+        return student_id in (data.get(key) or {})
+
     def is_manual_refresh_allowed(self) -> bool:
         """Check if a manual refresh is allowed (not in cooldown)."""
         return self.cooldown_manager.can_refresh()
@@ -352,7 +365,7 @@ class SchulmanagerCoordinator(DataUpdateCoordinator[IntegrationData]):
         """Request a manual refresh with cooldown enforcement."""
         if not self.is_manual_refresh_allowed():
             remaining = self.get_cooldown_remaining_seconds()
-            raise HomeAssistantError(
+            raise ServiceValidationError(
                 translation_domain="schulmanager",
                 translation_key="manual_refresh_cooldown",
                 translation_placeholders={"seconds": str(remaining)},

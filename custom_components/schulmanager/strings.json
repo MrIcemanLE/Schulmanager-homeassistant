@@ -95,7 +95,8 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
-      "reauth_successful": "Reauthentication was successful"
+      "reauth_successful": "Reauthentication was successful",
+      "wrong_account": "The credentials belong to a different Schulmanager account than this entry. Add that account as a new integration instead."
     }
   },
   "exceptions": {
@@ -162,6 +163,34 @@
           "password_rejected": "Schulmanager rejected the stored password. Re-authenticate the integration under Settings → Devices & services.",
           "cannot_connect": "Unable to connect to Schulmanager. Try again later.",
           "entry_removed": "The Schulmanager integration was removed."
+        }
+      }
+    }
+  },
+  "services": {
+    "clear_cache": {
+      "name": "Clear cache",
+      "description": "Clears the session data of the Schulmanager integration, so the next update logs in again."
+    },
+    "refresh": {
+      "name": "Refresh now",
+      "description": "Fetches all data from Schulmanager now. Respects the cooldown between manual refreshes."
+    },
+    "clear_debug": {
+      "name": "Clear debug folder",
+      "description": "Deletes all debug files in the integration folder."
+    },
+    "get_schedule": {
+      "name": "Get schedule (beta)",
+      "description": "Returns the already fetched schedule as structured data, e.g. for schedule cards. Does not query Schulmanager again. The format can still change in beta versions.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Schulmanager entry",
+          "description": "Only return this entry. Without it, all entries are returned."
+        },
+        "student_id": {
+          "name": "Student ID",
+          "description": "Only return this child (the Schulmanager ID of the child)."
         }
       }
     }

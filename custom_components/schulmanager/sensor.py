@@ -34,6 +34,9 @@ from .util import normalize_student_slug
 
 _LOGGER = get_logger(__name__)
 
+# Coordinator-based, no requests per entity
+PARALLEL_UPDATES = 0
+
 # Changes other than cancellation/substitution, marked with ⚠️ in the weekly plan
 CHANGED_LESSON_TYPES = frozenset(
     {"changedLesson", "roomChange", "specialLesson", "irregularLesson"}
@@ -154,6 +157,8 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     """Sensor entity for student schedule."""
 
     _attr_has_entity_name = True
+    # Large and only useful live (cards, templates), not in the history
+    _unrecorded_attributes = frozenset({"raw", "html", "plain"})
 
     def __init__(
         self,
@@ -196,7 +201,7 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return bool(self.coordinator.last_update_success)
+        return super().available and self.coordinator.has_student_data("schedule", self.student_id)
 
     @property
     def native_value(self) -> StateType:
@@ -519,7 +524,7 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
 
     def _get_target_date(self) -> datetime:
         """Get the date for the current day (today/tomorrow)."""
-        now = datetime.now()
+        now = dt_util.now()
         if self.day == "today":
             return now
         if self.day == "tomorrow":
@@ -647,7 +652,7 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return bool(self.coordinator.last_update_success)
+        return super().available and self.coordinator.has_student_data("schedule", self.student_id)
 
     @property
     def native_value(self) -> StateType:
@@ -728,7 +733,6 @@ class ScheduleChangesSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEn
         return {
             "changes": changes,
             "llm_structured_data": llm_data,
-            "last_updated": datetime.now().isoformat(),
         }
 
 
@@ -784,7 +788,7 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return bool(self.coordinator.last_update_success)
+        return super().available and self.coordinator.has_student_data("grades", self.student_id)
 
     @property
     def native_value(self) -> StateType:
@@ -952,7 +956,6 @@ class GradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
             "statistics": statistics,
             "grades_summary": grades_summary,
             "grades_summary_markdown": grades_summary_md,
-            "last_updated": datetime.now().isoformat(),
         }
 
 
@@ -1000,7 +1003,7 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return bool(self.coordinator.last_update_success)
+        return super().available and self.coordinator.has_student_data("grades", self.student_id)
 
     @property
     def native_value(self) -> StateType:
@@ -1049,7 +1052,6 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
                 "subject_averages": {},
                 "grades_summary": "No grades available",
                 "grades_summary_markdown": "_Keine Noten verfügbar_",
-                "last_updated": datetime.now().isoformat(),
             }
 
         # Collect subject averages
@@ -1103,7 +1105,6 @@ class OverallGradeSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntit
             "subject_averages": subject_averages,
             "grades_summary": grades_summary,
             "grades_summary_markdown": grades_summary_md,
-            "last_updated": datetime.now().isoformat(),
         }
 
 
@@ -1151,7 +1152,7 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return bool(self.coordinator.last_update_success)
+        return super().available and self.coordinator.has_student_data("exams", self.student_id)
 
     @property
     def native_value(self) -> StateType:
@@ -1171,7 +1172,7 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
             return None
 
         # Get current date
-        now = datetime.now().date()
+        now = dt_util.now().date()
 
         # Find the next upcoming exam
         next_exam_date = None
@@ -1225,11 +1226,10 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
             return {
                 "next_exam": None,
                 "total_upcoming_exams": 0,
-                "last_updated": datetime.now().isoformat(),
             }
 
         # Get current date
-        now = datetime.now().date()
+        now = dt_util.now().date()
 
         # Find next exam and collect upcoming exams
         next_exam = None
@@ -1299,7 +1299,6 @@ class NextExamCountdownSensor(CoordinatorEntity[SchulmanagerCoordinator], Sensor
             "next_exam": next_exam,
             "total_upcoming_exams": len(upcoming_exams),
             "upcoming_exams": upcoming_exams[:5],  # Show next 5 exams
-            "last_updated": datetime.now().isoformat(),
         }
 
 
@@ -1467,7 +1466,7 @@ class CurrentLessonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnti
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return bool(self.coordinator.last_update_success)
+        return super().available and self.coordinator.has_student_data("schedule", self.student_id)
 
     async def async_added_to_hass(self) -> None:
         """Register a 1-minute interval to keep state current between coordinator updates."""
@@ -1654,6 +1653,8 @@ class WochenplanJsonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnt
 
     _attr_has_entity_name = True
     _attr_translation_key = "wochenplan_json"
+    # Large and only useful live (Stundenplan Card), not in the history
+    _unrecorded_attributes = frozenset({"plan"})
     _attr_icon = "mdi:table-large"
 
     def __init__(
@@ -1685,9 +1686,14 @@ class WochenplanJsonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnt
         )
 
     @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return super().available and self.coordinator.has_student_data("schedule", self.student_id)
+
+    @property
     def native_value(self) -> StateType:
         """Return the calendar week as state."""
-        today = date.today()
+        today = dt_util.now().date()
         weekday = today.weekday()
         monday = today - timedelta(days=weekday) if weekday < 5 else today + timedelta(days=7 - weekday)
         iso = monday.isocalendar()
@@ -1719,7 +1725,7 @@ class WochenplanJsonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnt
         if not week_map:
             return []
 
-        today = date.today()
+        today = dt_util.now().date()
         weekday = today.weekday()
         # If weekend, show next week
         monday = today - timedelta(days=weekday) if weekday < 5 else today + timedelta(days=7 - weekday)

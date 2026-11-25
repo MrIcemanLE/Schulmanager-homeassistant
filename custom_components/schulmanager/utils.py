@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
     from .api_client import SchulmanagerClient
@@ -154,7 +155,7 @@ class CooldownManager:
         cooldown_minutes = get_validated_refresh_cooldown(self._config_entry)
         cooldown_period = timedelta(minutes=cooldown_minutes)
 
-        return datetime.now() - self._last_manual_refresh >= cooldown_period
+        return dt_util.utcnow() - self._last_manual_refresh >= cooldown_period
 
     def get_remaining_cooldown(self) -> int:
         """Get remaining cooldown time in seconds."""
@@ -163,7 +164,7 @@ class CooldownManager:
 
         cooldown_minutes = get_validated_refresh_cooldown(self._config_entry)
         cooldown_period = timedelta(minutes=cooldown_minutes)
-        elapsed = datetime.now() - self._last_manual_refresh
+        elapsed = dt_util.utcnow() - self._last_manual_refresh
 
         if elapsed >= cooldown_period:
             return 0
@@ -173,7 +174,7 @@ class CooldownManager:
 
     def record_refresh(self) -> None:
         """Record that a manual refresh was performed."""
-        self._last_manual_refresh = datetime.now()
+        self._last_manual_refresh = dt_util.utcnow()
 
 
 def get_feature_config(config_entry: ConfigEntry) -> dict[str, bool]:

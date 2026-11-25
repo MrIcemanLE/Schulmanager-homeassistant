@@ -1,22 +1,54 @@
 rules:
-  # Bronze (mandatory)
+  # Bronze
+  action-setup: done
+  appropriate-polling: done
+  brands: done
+  common-modules:
+    status: todo
+    comment: coordinator.py exists; device_info is still repeated per entity class instead of a shared entity.py base
   config-flow: done
+  config-flow-test-coverage:
+    status: todo
+    comment: Error recovery to entry creation and the already_configured abort are not tested yet
+  dependency-transparency: done
+  docs-actions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  entity-event-setup: done
   entity-unique-id: done
-  devices: done
-  diagnostics: done
-  codeowners: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
 
   # Silver
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
   entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable:
+    status: todo
+    comment: A failed fetch of a single feature is logged as a warning on every update instead of once
+  parallel-updates: done
   reauth-flow: done
-  runtime-data: done
-  translations: done
+  test-coverage:
+    status: todo
+    comment: Not measured against the 95 % target yet
 
   # Gold
-  parallel-updates:
-    status: exempt
-    comment: Single coordinator update covers all platforms
+  devices: done
+  diagnostics: done
+  entity-translations:
+    status: todo
+    comment: >-
+      Calendar names and sensor states are German text. Calendars use fixed names
+      because translated names would give new German installs English entity_ids;
+      sensor states are read by automations and stundenplan-suite.
+  stale-devices: done
 
   # Platinum
   strict-typing: todo
-  tests-coverage: todo

@@ -22,7 +22,7 @@ Bringt Stundenplan, Arbeiten, Hausaufgaben und Noten aus Schulmanager Online dir
 3. In HACS nach „Schulmanager Online“ suchen und herunterladen
 4. Home Assistant neu starten
 
-Voraussetzung: Home Assistant 2024.6 oder neuer.
+Voraussetzung: Home Assistant 2024.11 oder neuer.
 
 ### Manuelle Installation
 1. Dateien aus `custom_components/schulmanager` nach `<config>/custom_components/schulmanager/` kopieren
@@ -333,6 +333,16 @@ A: Ja, ab v0.13.0. Bei der Einrichtung gibst du den Code einmal ein. Schulmanage
 
 **Q: Was passiert, wenn sich mein Schulmanager-Passwort ändert?**
 A: Home Assistant zeigt automatisch eine Reauth-Benachrichtigung an, über die du die neuen Zugangsdaten eingeben kannst, ohne die Integration neu einzurichten.
+
+**Q: Was passiert, wenn Schulmanager gerade nicht erreichbar ist?**
+A: Die betroffenen Entitäten zeigen „Nicht verfügbar“, bis der nächste Abruf klappt (automatisch nach spätestens einer Stunde oder über „Jetzt aktualisieren“). Scheitert nur ein Teil, etwa die Noten, bleiben Stundenplan, Hausaufgaben und Co. normal verfügbar. Die Hausaufgabenliste behält ihre Einträge und Häkchen.
+
+## 🗑️ Entfernen
+
+1. Einstellungen → Geräte & Dienste → Schulmanager Online → ⋮ → **Löschen**
+2. Optional in HACS: Schulmanager Online → ⋮ → **Entfernen**, danach Home Assistant neu starten
+
+Beim Löschen entfernt die Integration auch ihre gespeicherten Daten (abgehakte Hausaufgaben, bekannte Klassenbucheinträge) und das gemerkte Gerät aus deinem Schulmanager-Konto, falls du die Zwei-Faktor-Anmeldung nutzt.
 
 ## 🐛 Fehlersuche
 

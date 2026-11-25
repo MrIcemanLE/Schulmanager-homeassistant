@@ -7,10 +7,10 @@ from typing import Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 
 from .const import DOMAIN, VERSION
 from .coordinator import SchulmanagerCoordinator
@@ -18,6 +18,9 @@ from .privacy import get_logger
 from .utils import get_validated_refresh_cooldown
 
 _LOGGER = get_logger(__name__)
+
+# A press starts a full refresh
+PARALLEL_UPDATES = 1
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
@@ -44,6 +47,7 @@ class RefreshButton(ButtonEntity):
         self.config_entry = entry
         # Stable unique ID per config entry
         self._attr_unique_id = f"schulmanager_{self.config_entry.entry_id}_refresh"
+        self._cancel_cooldown_end: CALLBACK_TYPE | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -58,11 +62,6 @@ class RefreshButton(ButtonEntity):
             suggested_area="Schule",
             configuration_url="https://login.schulmanager-online.de/",
         )
-
-    @property
-    def available(self) -> bool:
-        """Return if entity is available (not in cooldown)."""
-        return self.coordinator.is_manual_refresh_allowed()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -85,9 +84,25 @@ class RefreshButton(ButtonEntity):
         }
 
     async def async_press(self) -> None:
-        """Press the button with cooldown enforcement."""
-        try:
-            await self.coordinator.async_request_manual_refresh()
-        except Exception as err:
-            # Convert HomeAssistantError to ServiceValidationError for better UI display
-            raise ServiceValidationError(str(err)) from err
+        """Press the button; during the cooldown this raises a translated error."""
+        await self.coordinator.async_request_manual_refresh()
+        # The cooldown attributes changed, and change again when it ends
+        self.async_write_ha_state()
+        if self._cancel_cooldown_end is not None:
+            self._cancel_cooldown_end()
+        self._cancel_cooldown_end = async_call_later(
+            self.hass,
+            self.coordinator.get_cooldown_remaining_seconds() + 1,
+            self._async_cooldown_ended,
+        )
+
+    @callback
+    def _async_cooldown_ended(self, _now: Any) -> None:
+        self._cancel_cooldown_end = None
+        self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel the pending state update."""
+        if self._cancel_cooldown_end is not None:
+            self._cancel_cooldown_end()
+            self._cancel_cooldown_end = None

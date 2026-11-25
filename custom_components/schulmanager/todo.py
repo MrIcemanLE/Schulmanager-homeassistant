@@ -21,8 +21,52 @@ from .util import normalize_student_slug
 
 _LOGGER = get_logger(__name__)
 
+# Coordinator-based, no requests per entity
+PARALLEL_UPDATES = 0
+
 STORAGE_VERSION = 1
-STORAGE_KEY_PREFIX = f"{DOMAIN}_todo"
+# Before 0.14.1 statuses were stored per student, shared by all config entries
+LEGACY_STORAGE_KEY_PREFIX = f"{DOMAIN}_todo"
+
+
+def todo_status_store(
+    hass: HomeAssistant, entry_id: str
+) -> Store[dict[str, dict[str, str]]]:
+    """Return the store of the checked-off homework of a config entry."""
+    return Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}.todo_statuses")
+
+
+class TodoStatusStore:
+    """Statuses of checked-off homework per student: student_id -> uid -> status."""
+
+    def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+        """Initialize the store of a config entry."""
+        self._hass = hass
+        self._store = todo_status_store(hass, entry_id)
+        self.statuses: dict[str, dict[str, str]] = {}
+
+    async def async_load(self, student_ids: list[str]) -> None:
+        """Load the statuses, taking over the per-student stores of older versions."""
+        if (stored := await self._store.async_load()) is not None:
+            self.statuses = stored
+            return
+        for sid in student_ids:
+            legacy = Store[dict[str, Any]](
+                self._hass, STORAGE_VERSION, f"{LEGACY_STORAGE_KEY_PREFIX}_{sid}"
+            )
+            if (data := await legacy.async_load()) and data.get("statuses"):
+                self.statuses[sid] = dict(data["statuses"])
+            await legacy.async_remove()
+        if self.statuses:
+            await self._store.async_save(self.statuses)
+
+    def student(self, student_id: str) -> dict[str, str]:
+        """Return the statuses of a student, to read and change."""
+        return self.statuses.setdefault(student_id, {})
+
+    async def async_save(self) -> None:
+        """Persist the statuses."""
+        await self._store.async_save(self.statuses)
 
 
 def _make_uid(student_id: str, item: dict, occurrence: int = 0) -> str:
@@ -65,7 +109,7 @@ async def async_setup_entry(
         _LOGGER.exception("Failed to load students for todo: %s", err)
         return
 
-    entities: list[TodoListEntity] = []
+    valid: list[tuple[str, str]] = []
     for st in students:
         if not isinstance(st, dict):
             _LOGGER.debug("Skip non-dict student entry: %r", st)
@@ -75,13 +119,23 @@ async def async_setup_entry(
         if not sid or not name:
             _LOGGER.debug("Skip student with missing id/name: %r", st)
             continue
-        slug = normalize_student_slug(name)
+        valid.append((sid, name))
 
+    status_store = TodoStatusStore(hass, entry.entry_id)
+    await status_store.async_load([sid for sid, _ in valid])
+
+    entities: list[TodoListEntity] = []
+    for sid, name in valid:
         _LOGGER.debug("Creating todo entity for student %s (ID: %s)", name, sid)
-        entities.append(HomeworkTodoList(client, coord, sid, name, slug))
+        entities.append(
+            HomeworkTodoList(
+                client, coord, sid, name, normalize_student_slug(name), status_store
+            )
+        )
 
     _LOGGER.debug("Adding %d todo entities", len(entities))
-    async_add_entities(entities, update_before_add=True)
+    # No update_before_add: it would make the coordinator fetch everything again
+    async_add_entities(entities)
 
 
 class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntity):
@@ -97,6 +151,7 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         student_id: str,
         student_name: str,
         slug: str,
+        status_store: TodoStatusStore,
     ) -> None:
         """Initialize a homework todo list entity for a student."""
         super().__init__(coordinator)
@@ -111,9 +166,9 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         self._attr_translation_key = "homework"
         self._attr_icon = "mdi:clipboard-check-multiple-outline"
         self._attr_todo_items: list[TodoItem] | None = None
-        self._store: Store | None = None
+        self._status_store = status_store
         # uid -> TodoItemStatus string value; persisted across restarts
-        self._persisted_statuses: dict[str, str] = {}
+        self._persisted_statuses = status_store.student(student_id)
 
         _LOGGER.info(
             "Created HomeworkTodoList for %s (unique_id: %s)",
@@ -122,28 +177,16 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
         )
 
     async def async_added_to_hass(self) -> None:
-        """Handle entity added to hass, load persisted todo statuses."""
+        """Handle entity added to hass, apply the persisted todo statuses."""
         await super().async_added_to_hass()
-
-        # Initialize persistent store (keyed by student_id for stability)
-        self._store = Store(
-            self.hass,
-            STORAGE_VERSION,
-            f"{STORAGE_KEY_PREFIX}_{self.student_id}",
-        )
-
-        # Load previously persisted statuses
-        stored_data = await self._store.async_load()
-        if stored_data and isinstance(stored_data, dict):
-            self._persisted_statuses = stored_data.get("statuses", {})
-            _LOGGER.debug(
-                "Loaded %d persisted todo statuses for student %s",
-                len(self._persisted_statuses),
-                self.student_id,
-            )
-
-        # Force an immediate update so persisted statuses are applied
         self._handle_coordinator_update()
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available; a failed fetch leaves the student out."""
+        return super().available and self.coordinator.has_student_data(
+            "homework", self.student_id
+        )
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -166,7 +209,11 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
             if coord_data is None
             else cast(dict[str, list[dict[str, Any]]], coord_data.get("homework", {}))
         )
-        student_homework = homework_data.get(self.student_id, [])
+        if self.student_id not in homework_data:
+            # Failed fetch: keep the items, the entity is unavailable meanwhile
+            super()._handle_coordinator_update()
+            return
+        student_homework = homework_data[self.student_id]
 
         _LOGGER.debug(
             "Updating homework items for student %s: found %d items",
@@ -185,7 +232,6 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
             self._attr_todo_items = []
         else:
             todo_items: list[TodoItem] = []
-            current_uids: set[str] = set()
             duplicate_counters: dict[str, int] = {}
 
             for item in student_homework:
@@ -197,7 +243,6 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
                     else _make_uid(self.student_id, item, occurrence)
                 )
                 duplicate_counters[base_uid] = occurrence + 1
-                current_uids.add(uid)
 
                 subject = item.get("subject", "").strip()
                 homework = item.get("homework", "").strip()
@@ -247,17 +292,14 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
                     duplicate_uid_groups,
                 )
 
-            # Log removed items
-            if existing_items:
-                removed_uids = set(existing_items.keys()) - current_uids
-                if removed_uids:
-                    _LOGGER.debug(
-                        "Removed %d outdated todo items for student %s",
-                        len(removed_uids),
-                        self.student_id,
-                    )
-
             self._attr_todo_items = todo_items
+
+        # Forget statuses of homework Schulmanager no longer lists
+        current = {item.uid for item in self._attr_todo_items}
+        if stale := [uid for uid in self._persisted_statuses if uid not in current]:
+            for uid in stale:
+                del self._persisted_statuses[uid]
+            self.hass.async_create_task(self._async_save_statuses())
 
         _LOGGER.debug(
             "Updated %d todo items for student %s",
@@ -320,9 +362,7 @@ class HomeworkTodoList(CoordinatorEntity[SchulmanagerCoordinator], TodoListEntit
 
     async def _async_save_statuses(self) -> None:
         """Persist current todo statuses to HA storage."""
-        if self._store is None:
-            return
-        await self._store.async_save({"statuses": self._persisted_statuses})
+        await self._status_store.async_save()
         _LOGGER.debug(
             "Saved %d todo statuses for student %s",
             len(self._persisted_statuses),

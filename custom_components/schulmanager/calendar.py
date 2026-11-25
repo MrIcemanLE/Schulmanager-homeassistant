@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .classbook import flatten_entries
@@ -24,6 +25,9 @@ from .privacy import get_logger
 from .util import normalize_student_slug
 
 _LOGGER = get_logger(__name__)
+
+# Coordinator-based, no requests per entity
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
@@ -83,10 +87,12 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class ExamCalendarBase(CalendarEntity):
+class ExamCalendarBase(CoordinatorEntity[SchulmanagerCoordinator], CalendarEntity):
     """Base calendar entity for student exams."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
+    # Exam data of the student; a failed fetch leaves it out
+    _data_key = "exams"
 
     def __init__(
         self,
@@ -100,16 +106,17 @@ class ExamCalendarBase(CalendarEntity):
         icon: str,
     ) -> None:
         """Initialize the calendar entity."""
+        super().__init__(coordinator)
         self.hub = client
-        self.coordinator = coordinator
         self.student_id = student_id
         self.student_name = student_name
         # Stable unique ID, scoped to this config entry so the same student
         # appearing in another entry does not collide with it.
         entry_id = coordinator.config_entry.entry_id
         self._attr_unique_id = f"schulmanager_{entry_id}_{self.student_id}_{unique_suffix}"
-        # Full name with student for clarity
-        self._attr_name = f"{self.student_name} {name_suffix}"
+        # German on purpose: a translation_key would give new German installs
+        # English entity_ids, which dashboards and stundenplan-suite look up
+        self._attr_name = name_suffix
         self._attr_icon = icon
 
     def _matches_exam(self, exam: dict[str, Any]) -> bool:
@@ -295,7 +302,9 @@ class ExamCalendarBase(CalendarEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return bool(self.coordinator.last_update_success)
+        return super().available and self.coordinator.has_student_data(
+            self._data_key, self.student_id
+        )
 
 
 class ExamsCalendar(ExamCalendarBase):
@@ -384,6 +393,8 @@ class SchoolEventsCalendar(ExamCalendarBase):
 class ClassbookCalendar(ExamCalendarBase):
     """Calendar entity for class book entries, as all-day events."""
 
+    _data_key = "classbook"
+
     def __init__(
         self,
         client: Any,
@@ -429,10 +440,10 @@ class ClassbookCalendar(ExamCalendarBase):
         return "\n".join(parts)
 
 
-class ScheduleCalendar(CalendarEntity):
+class ScheduleCalendar(CoordinatorEntity[SchulmanagerCoordinator], CalendarEntity):
     """Calendar entity for student schedule lessons."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -445,23 +456,30 @@ class ScheduleCalendar(CalendarEntity):
         hide_cancelled_no_highlight: bool,
     ) -> None:
         """Initialize the schedule calendar entity."""
+        super().__init__(coordinator)
         self.hub = client
-        self.coordinator = coordinator
         self.student_id = student_id
         self.student_name = student_name
         # Stable unique ID, scoped to this config entry so the same student
         # appearing in another entry does not collide with it.
         entry_id = coordinator.config_entry.entry_id
         self._attr_unique_id = f"schulmanager_{entry_id}_{self.student_id}_schedule"
-        self._attr_name = f"{self.student_name} Stundenplan"
+        # German on purpose, see ExamCalendarBase
+        self._attr_name = "Stundenplan"
         self._attr_icon = "mdi:calendar-school"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"student_{student_id}")},
+            name=student_name,
+        )
         self.highlight = highlight
         self.hide_cancelled_no_highlight = hide_cancelled_no_highlight
 
     @property
     def available(self) -> bool:
         """Return availability based on coordinator state."""
-        return bool(self.coordinator.last_update_success)
+        return super().available and self.coordinator.has_student_data(
+            "schedule", self.student_id
+        )
 
     @property
     def event(self) -> CalendarEvent | None:
