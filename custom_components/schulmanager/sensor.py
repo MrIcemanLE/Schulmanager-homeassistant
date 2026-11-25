@@ -374,6 +374,7 @@ class ScheduleSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEntity):
                 "hour": hour_value,
                 "subject": primary_info["subject"],
                 "subject_full": primary_info["subject_full"],
+                "subject_label": primary_info["subject_label"],
                 "room": primary_info["room"],
                 "teacher": primary_info["teacher"],
                 "type": lesson_type,
@@ -1605,6 +1606,7 @@ class CurrentLessonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnti
         attrs: dict[str, Any] = {
             "current_subject": None,
             "current_subject_full": None,
+            "current_subject_label": None,
             "current_teacher": None,
             "current_room": None,
             "lesson_end": None,
@@ -1618,8 +1620,12 @@ class CurrentLessonSensor(CoordinatorEntity[SchulmanagerCoordinator], SensorEnti
             if from_t <= now_t < until_t:
                 actual = lesson.get("actualLesson") or {}
                 subj = actual.get("subject") or {}
+                label = actual.get("subjectLabel")
                 attrs["current_subject"] = subj.get("abbreviation")
                 attrs["current_subject_full"] = subj.get("name")
+                attrs["current_subject_label"] = (
+                    label.strip() if isinstance(label, str) and label.strip() else None
+                )
                 attrs["current_teacher"] = self._lesson_teacher(lesson)
                 attrs["current_room"] = (actual.get("room") or {}).get("name")
                 attrs["lesson_end"] = until_t.strftime("%H:%M")

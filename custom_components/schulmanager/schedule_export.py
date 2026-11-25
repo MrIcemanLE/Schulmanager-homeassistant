@@ -89,6 +89,7 @@ def _summary(record: dict[str, Any] | None) -> dict[str, Any]:
         return {
             "subject": "",
             "subject_full": "",
+            "subject_label": "",
             "teachers": [],
             "rooms": [],
             "group": None,
@@ -99,9 +100,11 @@ def _summary(record: dict[str, Any] | None) -> dict[str, Any]:
         full = subject.get("name") or short
     else:
         short = full = subject if isinstance(subject, str) else ""
+    label = record.get("subjectLabel")
     return {
         "subject": short,
         "subject_full": full,
+        "subject_label": label.strip() if isinstance(label, str) else "",
         "teachers": _teachers(record),
         "rooms": _rooms(record),
         "group": _group(record),
@@ -184,6 +187,7 @@ def export_lesson(entry: dict[str, Any]) -> dict[str, Any]:
         "end": _local_iso(day, class_hour.get("until")),
         "subject": current["subject"],
         "subject_full": current["subject_full"],
+        "subject_label": current["subject_label"],
         "group": current["group"],
         "course_id": str(course_id) if course_id is not None else None,
         "teachers": current["teachers"],
@@ -195,7 +199,10 @@ def export_lesson(entry: dict[str, Any]) -> dict[str, Any]:
         "original": (
             {
                 key: before[key]
-                for key in ("subject", "subject_full", "teachers", "rooms", "group")
+                for key in (
+                    "subject", "subject_full", "subject_label",
+                    "teachers", "rooms", "group",
+                )
             }
             if before
             else None

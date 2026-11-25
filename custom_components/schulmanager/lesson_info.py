@@ -38,9 +38,11 @@ def teacher_names(source: dict[str, Any]) -> str:
 def extract_core_info(source: dict[str, Any] | None) -> dict[str, str]:
     """Return subject, room and teacher of a single lesson record."""
     if not isinstance(source, dict):
-        return {"subject": "", "subject_full": "", "room": "", "teacher": ""}
+        return {"subject": "", "subject_full": "", "subject_label": "",
+                "room": "", "teacher": ""}
     subject = ""
     subject_full = ""
+    subject_label = ""
     subject_data = source.get("subject")
     if isinstance(subject_data, dict):
         subject = (
@@ -59,6 +61,9 @@ def extract_core_info(source: dict[str, Any] | None) -> dict[str, str]:
             or ""
         )
         subject_full = source.get("subjectLong") or source.get("subjectFull") or subject
+    label = source.get("subjectLabel")
+    if isinstance(label, str) and label.strip():
+        subject_label = label.strip()
     room_data = source.get("room")
     if isinstance(room_data, dict):
         room = (
@@ -75,6 +80,7 @@ def extract_core_info(source: dict[str, Any] | None) -> dict[str, str]:
     return {
         "subject": subject,
         "subject_full": subject_full,
+        "subject_label": subject_label,
         "room": room,
         "teacher": teacher,
     }
@@ -91,7 +97,8 @@ def extract_primary_info(lesson: dict[str, Any]) -> dict[str, str]:
         info = extract_core_info(candidate)
         if any(info.values()):
             return info
-    return {"subject": "", "subject_full": "", "room": "", "teacher": ""}
+    return {"subject": "", "subject_full": "", "subject_label": "",
+            "room": "", "teacher": ""}
 
 
 def extract_original_info(lesson: dict[str, Any]) -> dict[str, str]:
@@ -110,7 +117,8 @@ def extract_original_info(lesson: dict[str, Any]) -> dict[str, str]:
         info = extract_core_info(candidate)
         if any(info.values()):
             return info
-    return {"subject": "", "subject_full": "", "room": "", "teacher": ""}
+    return {"subject": "", "subject_full": "", "subject_label": "",
+            "room": "", "teacher": ""}
 
 
 def student_group_ids(record: dict[str, Any] | None) -> set[Any]:
