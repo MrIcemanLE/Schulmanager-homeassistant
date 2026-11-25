@@ -24,7 +24,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 from . import grading
-from .lesson_info import extract_original_info, normalize_hour
+from .lesson_info import extract_core_info, extract_original_info, normalize_hour
 from .privacy import (
     debug_enabled,
     get_logger,
@@ -1224,7 +1224,7 @@ class SchulmanagerClient:
     def _detect_lesson_change(self, lesson: dict[str, Any]) -> ScheduleChange | None:
         """Detect if a lesson represents a schedule change and structure it for LLM processing."""
         lesson_type = lesson.get("type", "")
-        actual_lesson = lesson.get("actualLesson", {})
+        actual_lesson = lesson.get("actualLesson") or {}
 
         # Different lesson types that indicate changes (German translations)
         change_types = {
@@ -1265,7 +1265,7 @@ class SchulmanagerClient:
             change_info["original_subject"] = original["subject"]
             change_info["subject_label"] = (
                 original["subject_label"]
-                or (actual_lesson.get("subjectLabel") or "").strip()
+                or extract_core_info(actual_lesson)["subject_label"]
             )
             change_info["original_teacher"] = original["teacher"]
             change_info["original_room"] = original["room"]
